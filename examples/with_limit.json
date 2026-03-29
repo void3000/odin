@@ -1,0 +1,23 @@
+{
+  "operation": "SELECT",
+  "source": {
+    "table": "products"
+  },
+  "fields": [
+    {
+      "field": "*"
+    }
+  ],
+  "filters": {
+    "field": "category",
+    "op": "IN",
+    "value": ["electronics", "books", "clothing"]
+  },
+  "order_by": [
+    {
+      "field": "price",
+      "direction": "DESC"
+    }
+  ],
+  "limit": 10
+}

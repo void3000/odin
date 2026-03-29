@@ -1,0 +1,60 @@
+{
+  "operation": "SELECT",
+  "source": {
+    "table": "users"
+  },
+  "fields": [
+    {
+      "field": "name",
+      "table": "users"
+    },
+    {
+      "field": "total",
+      "table": "orders"
+    },
+    {
+      "field": "created_at",
+      "table": "orders",
+      "alias": "order_date"
+    }
+  ],
+  "joins": [
+    {
+      "type": "INNER",
+      "table": "orders",
+      "on": {
+        "field": "id",
+        "table": "users",
+        "op": "=",
+        "value": {
+          "field": "user_id",
+          "table": "orders"
+        }
+      }
+    }
+  ],
+  "filters": {
+    "logic": "AND",
+    "conditions": [
+      {
+        "field": "tier",
+        "table": "users",
+        "op": "=",
+        "value": "premium"
+      },
+      {
+        "field": "total",
+        "table": "orders",
+        "op": ">",
+        "value": 100
+      }
+    ]
+  },
+  "order_by": [
+    {
+      "field": "created_at",
+      "table": "orders",
+      "direction": "DESC"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "operation": "SELECT",
+  "source": {
+    "table": "users"
+  },
+  "fields": [
+    {
+      "field": "*"
+    }
+  ],
+  "filters": {
+    "field": "status",
+    "op": "=",
+    "value": "active"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "operation": "SELECT",
+  "source": {
+    "table": "users"
+  },
+  "fields": [
+    {
+      "field": "id"
+    },
+    {
+      "field": "name"
+    },
+    {
+      "field": "email"
+    }
+  ],
+  "filters": {
+    "logic": "OR",
+    "conditions": [
+      {
+        "field": "tier",
+        "op": "=",
+        "value": "VIP"
+      },
+      {
+        "logic": "AND",
+        "conditions": [
+          {
+            "field": "age",
+            "op": ">",
+            "value": 10
+          },
+          {
+            "field": "status",
+            "op": "=",
+            "value": "active"
+          }
+        ]
+      }
+    ]
+  }
+}
