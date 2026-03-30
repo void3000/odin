@@ -10,7 +10,6 @@ Coordinates the complete query processing pipeline:
 """
 
 import logging
-import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.ir.models import QueryIR
@@ -18,6 +17,8 @@ from src.ir.parser import IRParser
 from src.ir.validator import IRValidator
 from src.query_builder import SQLBuilder
 from src.summarizer import ResultSummarizer
+from src.executor.connectors.sqlite import SQLiteConnector
+from src.executor.errors import DatabaseError
 from src.logging_config import get_component_logger
 
 logger = get_component_logger("orchestrator")
@@ -68,14 +69,12 @@ class QueryOrchestrator:
     def process_query(
         self,
         natural_language: str,
-        return_format: str = "dict"
     ) -> Dict[str, Any]:
         """
         Process a natural language query through the complete pipeline.
 
         Args:
             natural_language: User's question in natural language
-            return_format: "dict" for dict rows or "tuple" for tuple rows
 
         Returns:
             Dict with success status, summary, and metadata
@@ -125,22 +124,23 @@ class QueryOrchestrator:
 
             # Stage 4: Execute SQL query
             logger.info("Stage 4: Executing SQL query...")
+            connector = SQLiteConnector(database=self.db_path)
             try:
-                with sqlite3.connect(self.db_path) as conn:
-                    if return_format == "dict":
-                        conn.row_factory = sqlite3.Row
-                    cursor = conn.cursor()
-                    cursor.execute(sql, params or [])
-                    rows = cursor.fetchall()
-                    if return_format == "dict":
-                        exec_result = [dict(row) for row in rows]
-                    else:
-                        exec_result = [tuple(row) for row in rows]
-            except sqlite3.Error as e:
-                result["error"] = f"Database error: {str(e)}"
+                connector.connect()
+                raw_result = connector.execute_query(
+                    {"sql": sql, "params": params or []}
+                )
+                exec_result = [
+                    dict(zip(raw_result.columns, row))
+                    for row in raw_result.rows
+                ]
+            except DatabaseError as e:
+                result["error"] = str(e)
                 result["metadata"]["stage"] = "execute"
                 logger.error(f"Execution failed: {e}")
                 return result
+            finally:
+                connector.disconnect()
 
             result["metadata"]["row_count"] = len(exec_result)
             logger.info(f"Stage 4 complete: Query executed successfully, returned {len(exec_result)} rows")
