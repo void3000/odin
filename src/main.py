@@ -239,8 +239,11 @@ def main():
         result = text2sql.query(args.query)
         
         # Print result
-        import json
-        print(json.dumps(result, indent=2, default=str))
+        if result["success"]:
+            print(result["summary"])
+        else:
+            print(f"Error: {result['error']}", file=sys.stderr)
+            sys.exit(1)
         
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)
