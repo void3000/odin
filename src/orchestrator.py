@@ -126,17 +126,16 @@ class QueryOrchestrator:
             # Stage 4: Execute SQL query
             logger.info("Stage 4: Executing SQL query...")
             try:
-                conn = sqlite3.connect(self.db_path)
-                if return_format == "dict":
-                    conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                cursor.execute(sql, params or [])
-                rows = cursor.fetchall()
-                conn.close()
-                if return_format == "dict":
-                    exec_result = [dict(row) for row in rows]
-                else:
-                    exec_result = [tuple(row) for row in rows]
+                with sqlite3.connect(self.db_path) as conn:
+                    if return_format == "dict":
+                        conn.row_factory = sqlite3.Row
+                    cursor = conn.cursor()
+                    cursor.execute(sql, params or [])
+                    rows = cursor.fetchall()
+                    if return_format == "dict":
+                        exec_result = [dict(row) for row in rows]
+                    else:
+                        exec_result = [tuple(row) for row in rows]
             except sqlite3.Error as e:
                 result["error"] = f"Database error: {str(e)}"
                 result["metadata"]["stage"] = "execute"
