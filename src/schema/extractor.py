@@ -38,7 +38,7 @@ class SQLiteSchemaExtractor:
                 foreign_keys = self._get_foreign_keys(conn, table_name)
 
                 column_defs = []
-                for col_name, col_type, not_null, default_val, is_pk in columns:
+                for cid, col_name, col_type, not_null, default_val, is_pk in columns:
                     # Map SQLite types to IR types
                     ir_type = self._map_type(col_type)
 

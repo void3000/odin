@@ -9,6 +9,41 @@ This demonstrates the complete pipeline:
 5. Result display
 """
 import os
+import logging
+from datetime import datetime
+
+# Custom formatter matching: YYYY-MM-DD HH:MM:SS  [LEVEL] message
+class OdinFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        # Format: 2026-03-30 17:56:07
+        dt = datetime.fromtimestamp(record.created)
+        return f"{dt.strftime('%Y-%m-%d %H:%M:%S')}"
+
+    def format(self, record):
+        # Format: YYYY-MM-DD HH:MM:SS  [LEVEL] message
+        timestamp = self.formatTime(record)
+        level = record.levelname
+        message = record.getMessage()
+        return f"{timestamp}  [{level}] {message}"
+
+def setup_logging(level=logging.INFO):
+    """Configure logging with the Odin format."""
+    logger = logging.getLogger("odin")
+    logger.setLevel(level)
+
+    # Clear any existing handlers
+    if logger.handlers:
+        logger.handlers.clear()
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(OdinFormatter())
+    logger.addHandler(console_handler)
+
+    return logger
+
+# Setup logging at module level
+logger = setup_logging(logging.INFO)
+
 from src.ir.models import (
     QueryIR,
     TableSource,
@@ -27,9 +62,9 @@ from src.schema.extractor import SQLiteSchemaExtractor
 
 def run_natural_language_demo(nl_converter, builder, executor):
     """Demo: Natural Language to SQL conversion."""
-    print("\n" + "=" * 80)
-    print("NATURAL LANGUAGE QUERY DEMO")
-    print("=" * 80)
+    logger.info("=" * 80)
+    logger.info("NATURAL LANGUAGE QUERY DEMO")
+    logger.info("=" * 80)
 
     queries = [
         "Show me all artists",
@@ -38,89 +73,90 @@ def run_natural_language_demo(nl_converter, builder, executor):
     ]
 
     for nl_query in queries:
-        print(f"\n🗣️  Natural Language: \"{nl_query}\"")
-        print("-" * 80)
+        logger.info(f"\nNatural Language: \"{nl_query}\"")
+        logger.info("-" * 80)
 
         try:
             # Step 1: NL → IR (using LLM)
+            logger.debug(f"Converting natural language to IR...")
             query_ir = nl_converter.convert(nl_query, nl_converter.schema)
-            print(f"✓ IR Generated")
+            logger.info("IR Generated")
 
             # Step 2: IR → SQL
+            logger.debug(f"Building SQL from IR...")
             query_result = builder.build(query_ir)
-            print(f"✓ SQL Generated:\n{query_result.query['sql']}")
+            logger.info(f"SQL Generated:\n{query_result.query['sql']}")
 
             if query_result.query['params']:
-                print(f"Parameters: {query_result.query['params']}")
+                logger.debug(f"Parameters: {query_result.query['params']}")
 
             # Step 3: Execute
+            logger.debug("Executing query...")
             result = executor.execute(query_result)
-            print(f"\n✓ Results ({len(result.rows)} rows):")
+            logger.info(f"Results ({len(result.rows)} rows):")
 
             # Show first 3 rows
             for i, row in enumerate(result.rows[:3]):
-                print(f"  {i+1}. {row}")
+                logger.info(f"  {i+1}. {row}")
 
             if len(result.rows) > 3:
-                print(f"  ... and {len(result.rows) - 3} more")
+                logger.info(f"  ... and {len(result.rows) - 3} more")
 
         except Exception as e:
-            print(f"❌ Error: {e}")
+            logger.error(f"Error: {e}")
 
 
 def main():
     # Connection string for Chinook sample database
     db_path = "/home/void-3000/.local/share/DBeaverData/workspace6/.metadata/sample-database-sqlite-1/Chinook.db"
 
-    print("=" * 80)
-    print("Odin LLM-to-SQL Pipeline - SQLite Chinook Database Demo")
-    print("=" * 80)
-    print()
+    logger.info("=" * 80)
+    logger.info("Odin LLM-to-SQL Pipeline - SQLite Chinook Database Demo")
+    logger.info("=" * 80)
 
     # Initialize connector and executor
-    print(f"Connecting to: {db_path}")
+    logger.info(f"Connecting to: {db_path}")
     connector = SQLiteConnector(database=db_path)
     executor = QueryExecutor(connector=connector)
     builder = PostgreSQLBuilder()
 
     # Extract database schema for LLM context
-    print("Extracting database schema...")
+    logger.info("Extracting database schema...")
     schema_extractor = SQLiteSchemaExtractor(db_path)
     schema = schema_extractor.extract_schema()
-    print(f"✓ Found {len(schema.tables)} tables")
+    logger.info(f"Found {len(schema.tables)} tables")
 
     # Initialize LM Studio converter
     nl_converter = None
-    print("Initializing LM Studio converter...")
+    logger.info("Initializing LM Studio converter...")
     try:
         nl_converter = NaturalLanguageToIR(api_key="lmstudio")
         nl_converter.schema = schema  # Store schema for demo function
-        print("✓ LM Studio ready (http://localhost:1234)")
+        logger.info("LM Studio ready (http://localhost:1234)")
     except Exception as e:
-        print(f"⚠ LM Studio initialization failed: {e}")
-        print("  Make sure LM Studio is running on port 1234")
-        print("  Natural language demo will be skipped")
+        logger.warning(f"LM Studio initialization failed: {e}")
+        logger.warning("  Make sure LM Studio is running on port 1234")
+        logger.warning("  Natural language demo will be skipped")
 
     try:
         connector.connect()
-        print("✓ Connected successfully")
+        logger.info("Connected successfully")
 
         # Run Natural Language Demo (if available)
         if nl_converter:
             run_natural_language_demo(nl_converter, builder, executor)
         else:
-            print("\n⚠ Skipping Natural Language demo (LM Studio not available)")
+            logger.warning("Skipping Natural Language demo (LM Studio not available)")
 
         # Manual IR Examples
-        print("\n" + "=" * 80)
-        print("MANUAL IR CONSTRUCTION DEMO (Programmatic Queries)")
-        print("=" * 80)
-        print()
+        logger.info("=" * 80)
+        logger.info("MANUAL IR CONSTRUCTION DEMO (Programmatic Queries)")
+        logger.info("=" * 80)
 
         # Example 1: Get all artists
-        print("-" * 80)
-        print("Example 1: Get all artists (limited to 5)")
-        print("-" * 80)
+        logger.info("-" * 80)
+        logger.info("Example 1: Get all artists (limited to 5)")
+        logger.info("-" * 80)
 
         query_ir = QueryIR(
             operation="SELECT",
@@ -136,21 +172,19 @@ def main():
         builder = PostgreSQLBuilder()
         query_result = builder.build(query_ir)
 
-        print(f"Generated SQL: {query_result.query['sql']}")
-        print()
+        logger.info(f"Generated SQL: {query_result.query['sql']}")
 
         # Execute query
         result = executor.execute(query_result)
 
-        print(f"Results ({result.rowcount} rows):")
+        logger.info(f"Results ({result.rowcount} rows):")
         for row in result.rows:
-            print(f"  {row}")
-        print()
+            logger.info(f"  {row}")
 
         # Example 2: Filter albums by artist
-        print("-" * 80)
-        print("Example 2: Get albums by AC/DC (ArtistId = 1)")
-        print("-" * 80)
+        logger.info("-" * 80)
+        logger.info("Example 2: Get albums by AC/DC (ArtistId = 1)")
+        logger.info("-" * 80)
 
         query_ir = QueryIR(
             operation="SELECT",
@@ -169,21 +203,19 @@ def main():
 
         query_result = builder.build(query_ir)
 
-        print(f"Generated SQL: {query_result.query['sql']}")
-        print(f"Parameters: {query_result.query['params']}")
-        print()
+        logger.info(f"Generated SQL: {query_result.query['sql']}")
+        logger.debug(f"Parameters: {query_result.query['params']}")
 
         result = executor.execute(query_result)
 
-        print(f"Results ({result.rowcount} rows):")
+        logger.info(f"Results ({result.rowcount} rows):")
         for row in result.rows:
-            print(f"  {row}")
-        print()
+            logger.info(f"  {row}")
 
         # Example 3: Search tracks with LIKE
-        print("-" * 80)
-        print("Example 3: Search tracks containing 'Love'")
-        print("-" * 80)
+        logger.info("-" * 80)
+        logger.info("Example 3: Search tracks containing 'Love'")
+        logger.info("-" * 80)
 
         query_ir = QueryIR(
             operation="SELECT",
@@ -202,21 +234,19 @@ def main():
 
         query_result = builder.build(query_ir)
 
-        print(f"Generated SQL: {query_result.query['sql']}")
-        print(f"Parameters: {query_result.query['params']}")
-        print()
+        logger.info(f"Generated SQL: {query_result.query['sql']}")
+        logger.debug(f"Parameters: {query_result.query['params']}")
 
         result = executor.execute(query_result)
 
-        print(f"Results ({result.rowcount} rows):")
+        logger.info(f"Results ({result.rowcount} rows):")
         for row in result.rows:
-            print(f"  {row}")
-        print()
+            logger.info(f"  {row}")
 
         # Example 4: INNER JOIN - Artists and Albums
-        print("-" * 80)
-        print("Example 4: INNER JOIN - AC/DC's Albums")
-        print("-" * 80)
+        logger.info("-" * 80)
+        logger.info("Example 4: INNER JOIN - AC/DC's Albums")
+        logger.info("-" * 80)
 
         query_ir = QueryIR(
             operation="SELECT",
@@ -247,21 +277,19 @@ def main():
 
         query_result = builder.build(query_ir)
 
-        print(f"Generated SQL:\n{query_result.query['sql']}")
-        print(f"\nParameters: {query_result.query['params']}")
-        print()
+        logger.info(f"Generated SQL:\n{query_result.query['sql']}")
+        logger.debug(f"Parameters: {query_result.query['params']}")
 
         result = executor.execute(query_result)
 
-        print(f"Results ({len(result.rows)} rows):")
+        logger.info(f"Results ({len(result.rows)} rows):")
         for row in result.rows:
-            print(f"  {row['artist']:20} - {row['album']}")
-        print()
+            logger.info(f"  {row['artist']:20} - {row['album']}")
 
         # Example 5: Triple JOIN - Artists → Albums → Tracks
-        print("-" * 80)
-        print("Example 5: Triple JOIN - Rock songs over 4 minutes")
-        print("-" * 80)
+        logger.info("-" * 80)
+        logger.info("Example 5: Triple JOIN - Rock songs over 4 minutes")
+        logger.info("-" * 80)
 
         query_ir = QueryIR(
             operation="SELECT",
@@ -319,29 +347,27 @@ def main():
 
         query_result = builder.build(query_ir)
 
-        print(f"Generated SQL:\n{query_result.query['sql']}")
-        print()
+        logger.info(f"Generated SQL:\n{query_result.query['sql']}")
 
         result = executor.execute(query_result)
 
-        print(f"Results ({len(result.rows)} rows):")
+        logger.info(f"Results ({len(result.rows)} rows):")
         for row in result.rows:
             duration_min = row['duration_ms'] / 60000
-            print(f"  {row['artist']:20} | {row['track']:45} | {duration_min:.2f} min")
-        print()
+            logger.info(f"  {row['artist']:20} | {row['track']:45} | {duration_min:.2f} min")
 
-        print("=" * 80)
-        print("All examples completed successfully!")
-        print("=" * 80)
+        logger.info("=" * 80)
+        logger.info("All examples completed successfully!")
+        logger.info("=" * 80)
 
     except Exception as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         import traceback
         traceback.print_exc()
 
     finally:
         connector.disconnect()
-        print("\nDatabase connection closed")
+        logger.info("Database connection closed")
 
 
 if __name__ == "__main__":

@@ -1,316 +1,272 @@
 """
-IR Validator
+IR (Intermediate Representation) Validator.
 
-Provides semantic validation for IR structures beyond Pydantic's schema validation.
-Validates that tables and fields exist in the database schema, operators match field types,
-and logical expressions are well-formed.
+Validates parsed queries against the database schema before SQL generation,
+catching errors early and providing helpful feedback to users.
 """
 
-from typing import Set, Dict, Any, List
+import logging
+from typing import Any, Dict, List, Set
+
 from pydantic import ValidationError
 
-from .models import (
-    QueryIR,
-    FieldExpr,
-    JoinExpr,
-    ConditionExpr,
-    LogicalExpr,
-    FilterExpr,
-    OrderExpr,
+from src.ir.models import (
+    ConditionExpr, FilterExpr, JoinExpr, LogicalExpr, OrderExpr, QueryIR
 )
+from src.schema.extractor import SQLiteSchemaExtractor
+from src.logging_config import get_component_logger
 
-
-class ValidationError(Exception):
-    """Base validation error."""
-    pass
-
-
-class TableNotFoundError(ValidationError):
-    """Table does not exist in schema."""
-    pass
-
-
-class FieldNotFoundError(ValidationError):
-    """Field does not exist in table."""
-    pass
-
-
-class TypeMismatchError(ValidationError):
-    """Operator type does not match field type."""
-    pass
+logger = get_component_logger("ir.validator")
 
 
 class IRValidator:
     """
-    Validates IR structures against a database schema.
-
-    Performs semantic validation including:
-    - Table existence
-    - Field existence in their tables
-    - Type compatibility between operators and field types
-    - Logical expression correctness
+    Validates IR queries against the database schema.
+    
+    Ensures that all referenced tables, columns, and operators are valid
+    before attempting SQL generation.
     """
-
-    def __init__(self, schema: Dict[str, Dict[str, str]]):
+    
+    def __init__(self, schema: Dict[str, Any]):
         """
-        Initialize the validator with a database schema.
-
+        Initialize validator with a parsed design document schema.
+        
         Args:
-            schema: Dictionary mapping table names to field definitions.
-                   Format: {"table_name": {"field_name": "field_type", ...}, ...}
-                   Example: {
-                       "users": {"id": "int", "name": "str", "age": "int"},
-                       "orders": {"id": "int", "user_id": "int", "total": "float"}
-                   }
+            schema: Parsed design document containing table definitions
         """
         self.schema = schema
-
-    def validate(self, query_ir: QueryIR) -> None:
+        self.tables: Set[str] = set(schema.keys())
+        logger.debug(f"IRValidator initialized with {len(self.tables)} tables")
+    
+    def validate_query(self, query_ir: QueryIR) -> List[str]:
         """
-        Validate a complete QueryIR against the schema.
-
+        Validate a complete IR query against the schema.
+        
         Args:
-            query_ir: The QueryIR to validate
-
-        Raises:
-            ValidationError: If any validation check fails
+            query_ir: The parsed query to validate
+            
+        Returns:
+            List of error messages (empty if validation passes)
         """
-        # Validate source table
-        self._validate_table(query_ir.source.table)
-
-        # Collect all tables involved in the query
-        tables = {query_ir.source.table}
-
+        errors = []
+        logger.info(f"Validating query for table: {query_ir.source.table}")
+        
+        # Validate source table exists
+        if query_ir.source.table not in self.tables:
+            error_msg = f"Table '{query_ir.source.table}' does not exist. Available tables: {', '.join(sorted(self.tables))}"
+            errors.append(error_msg)
+            logger.error(error_msg)
+            return errors  # Can't validate further without valid source table
+        
+        # Validate fields
+        field_errors = self._validate_fields(query_ir.fields, query_ir.source.table)
+        errors.extend(field_errors)
+        
         # Validate joins
         if query_ir.joins:
-            for join in query_ir.joins:
-                self._validate_join(join, tables)
-                tables.add(join.table)
-
-        # Validate fields
-        for field in query_ir.fields:
-            self._validate_field_expr(field, tables)
-
+            join_errors = self._validate_joins(query_ir.joins, query_ir.source.table)
+            errors.extend(join_errors)
+        
         # Validate filters
         if query_ir.filters:
-            self._validate_filter_expr(query_ir.filters, tables)
-
-        # Validate order_by
+            filter_errors = self._validate_filters(
+                query_ir.filters,
+                self._get_available_tables(query_ir.source.table, query_ir.joins or [])
+            )
+            errors.extend(filter_errors)
+        
+        # Validate order by
         if query_ir.order_by:
-            for order_expr in query_ir.order_by:
-                self._validate_order_expr(order_expr, tables)
-
-    def _validate_table(self, table: str) -> None:
-        """Validate that a table exists in the schema."""
-        if table not in self.schema:
-            raise TableNotFoundError(
-                f"Table '{table}' not found in schema. "
-                f"Available tables: {', '.join(self.schema.keys())}"
+            order_errors = self._validate_order_by(
+                query_ir.order_by,
+                self._get_available_tables(query_ir.source.table, query_ir.joins or [])
             )
-
-    def _validate_field_in_table(self, field: str, table: str) -> str:
-        """
-        Validate that a field exists in a table and return its type.
-
-        Args:
-            field: Field name
-            table: Table name
-
-        Returns:
-            Field type as string
-
-        Raises:
-            FieldNotFoundError: If field doesn't exist in table
-        """
-        if field == "*":
-            return "any"
-
-        if table not in self.schema:
-            raise TableNotFoundError(f"Table '{table}' not found")
-
-        if field not in self.schema[table]:
-            raise FieldNotFoundError(
-                f"Field '{field}' not found in table '{table}'. "
-                f"Available fields: {', '.join(self.schema[table].keys())}"
+            errors.extend(order_errors)
+        
+        # Validate limit
+        if query_ir.limit is not None and query_ir.limit < 1:
+            error_msg = "Limit must be a positive integer >= 1"
+            errors.append(error_msg)
+            logger.error(error_msg)
+        
+        if errors:
+            logger.warning(f"Validation failed with {len(errors)} error(s)")
+        else:
+            logger.info("Query validation passed")
+        
+        return errors
+    
+    def _validate_fields(self, fields: List[Any], source_table: str) -> List[str]:
+        """Validate SELECT field references."""
+        errors = []
+        table_schema = self.schema.get(source_table, {})
+        available_columns = set(table_schema.get("columns", {}).keys())
+        
+        for field in fields:
+            if field.field == "*":
+                continue  # Wildcard is always valid
+            
+            # Determine which table to check against
+            target_table = field.table or source_table
+            
+            if target_table not in self.tables:
+                error_msg = f"Field '{field.field}' references unknown table '{target_table}'"
+                errors.append(error_msg)
+                logger.error(error_msg)
+                continue
+            
+            # Check if column exists in the specified table
+            target_schema = self.schema.get(target_table, {})
+            target_columns = set(target_schema.get("columns", {}).keys())
+            
+            if field.field not in target_columns:
+                error_msg = f"Column '{field.field}' does not exist in table '{target_table}'. Available: {', '.join(sorted(target_columns))}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+        
+        return errors
+    
+    def _validate_joins(self, joins: List[JoinExpr], source_table: str) -> List[str]:
+        """Validate JOIN clauses."""
+        errors = []
+        available_tables = {source_table}
+        
+        for join in joins:
+            # Check if joined table exists
+            if join.table not in self.tables:
+                error_msg = f"JOIN table '{join.table}' does not exist. Available tables: {', '.join(sorted(self.tables))}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+                continue
+            
+            # Validate join condition
+            cond_errors = self._validate_filters(
+                join.on,
+                available_tables | {join.table}
             )
-
-        return self.schema[table][field]
-
-    def _validate_field_expr(self, field_expr: FieldExpr, available_tables: Set[str]) -> None:
-        """Validate a FieldExpr."""
-        # If table is specified, validate it
-        if field_expr.table:
-            if field_expr.table not in available_tables:
-                raise ValidationError(
-                    f"Table '{field_expr.table}' referenced in field expression "
-                    f"but not available in query. Available: {', '.join(available_tables)}"
-                )
-            self._validate_field_in_table(field_expr.field, field_expr.table)
-        else:
-            # If no table specified, field must exist in at least one available table
-            if field_expr.field != "*":
-                found = False
-                for table in available_tables:
-                    try:
-                        self._validate_field_in_table(field_expr.field, table)
-                        found = True
-                        break
-                    except FieldNotFoundError:
-                        continue
-
-                if not found:
-                    raise FieldNotFoundError(
-                        f"Field '{field_expr.field}' not found in any available table: "
-                        f"{', '.join(available_tables)}"
-                    )
-
-    def _validate_join(self, join_expr: JoinExpr, existing_tables: Set[str]) -> None:
-        """Validate a JoinExpr."""
-        # Validate the joined table exists
-        self._validate_table(join_expr.table)
-
-        # Validate the join condition
-        # The condition should reference fields from existing tables and the new table
-        all_tables = existing_tables | {join_expr.table}
-        self._validate_condition_expr(join_expr.on, all_tables)
-
-    def _validate_condition_expr(
-        self, condition: ConditionExpr, available_tables: Set[str]
-    ) -> None:
-        """Validate a ConditionExpr."""
-        # Determine which table the field belongs to
-        if condition.table:
-            if condition.table not in available_tables:
-                raise ValidationError(
-                    f"Table '{condition.table}' in condition not available. "
-                    f"Available: {', '.join(available_tables)}"
-                )
-            field_type = self._validate_field_in_table(condition.field, condition.table)
-        else:
-            # Try to find the field in available tables
-            field_type = None
-            for table in available_tables:
-                try:
-                    field_type = self._validate_field_in_table(condition.field, table)
-                    break
-                except FieldNotFoundError:
-                    continue
-
-            if field_type is None:
-                raise FieldNotFoundError(
-                    f"Field '{condition.field}' not found in any available table"
-                )
-
-        # Validate operator compatibility with field type
-        self._validate_operator_type(condition.op, field_type, condition.value)
-
-    def _validate_filter_expr(self, filter_expr: FilterExpr, available_tables: Set[str]) -> None:
-        """Validate a FilterExpr (recursive for LogicalExpr)."""
+            errors.extend(cond_errors)
+            
+            # Add joined table to available tables for subsequent joins
+            available_tables.add(join.table)
+        
+        return errors
+    
+    def _validate_filters(self, filter_expr: FilterExpr, available_tables: Set[str]) -> List[str]:
+        """Recursively validate WHERE clause conditions."""
+        errors = []
+        logger.debug(f"Validating filter expression type: {type(filter_expr).__name__}")
+        
         if isinstance(filter_expr, ConditionExpr):
-            self._validate_condition_expr(filter_expr, available_tables)
+            # Validate single condition
+            target_table = filter_expr.table
+            field_name = filter_expr.field
+            
+            # If no table specified, check all available tables
+            if target_table is None:
+                matching_tables = [t for t in available_tables 
+                                  if self._column_exists(t, field_name)]
+                if len(matching_tables) == 0:
+                    error_msg = f"Column '{field_name}' not found in any available table: {', '.join(sorted(available_tables))}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+                elif len(matching_tables) > 1 and len(available_tables) > 1:
+                    # Ambiguous column reference - warn but don't error
+                    warning_msg = f"Column '{field_name}' exists in multiple tables: {', '.join(sorted(matching_tables))}. Consider qualifying with table name."
+                    errors.append(warning_msg)
+                    logger.warning(warning_msg)
+            else:
+                # Table is specified - validate it exists and has the column
+                if target_table not in available_tables:
+                    error_msg = f"Column '{field_name}' references table '{target_table}' which is not available in this query"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+                elif not self._column_exists(target_table, field_name):
+                    available_cols = set(self.schema.get(target_table, {}).get("columns", {}).keys())
+                    error_msg = f"Column '{field_name}' does not exist in table '{target_table}'. Available: {', '.join(sorted(available_cols))}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+            
+            # Validate operator compatibility with column type
+            self._validate_operator_type(filter_expr, target_table or list(available_tables)[0])
+        
         elif isinstance(filter_expr, LogicalExpr):
-            for sub_condition in filter_expr.conditions:
-                self._validate_filter_expr(sub_condition, available_tables)
-        else:
-            raise ValidationError(f"Unknown filter expression type: {type(filter_expr)}")
-
-    def _validate_order_expr(self, order_expr: OrderExpr, available_tables: Set[str]) -> None:
-        """Validate an OrderExpr."""
-        if order_expr.table:
-            if order_expr.table not in available_tables:
-                raise ValidationError(
-                    f"Table '{order_expr.table}' in ORDER BY not available"
-                )
-            self._validate_field_in_table(order_expr.field, order_expr.table)
-        else:
-            # Field must exist in at least one table
-            found = False
-            for table in available_tables:
-                try:
-                    self._validate_field_in_table(order_expr.field, table)
-                    found = True
-                    break
-                except FieldNotFoundError:
-                    continue
-
-            if not found:
-                raise FieldNotFoundError(
-                    f"Field '{order_expr.field}' in ORDER BY not found in any available table"
-                )
-
-    def _validate_operator_type(self, op: str, field_type: str, value: Any) -> None:
-        """
-        Validate that an operator is compatible with a field type and value.
-
-        Args:
-            op: The operator (=, !=, >, >=, <, <=, LIKE, IN)
-            field_type: The type of the field (int, float, str, bool, etc.)
-            value: The value being compared
-
-        Raises:
-            TypeMismatchError: If operator is incompatible with field type
-        """
-        # LIKE operator only works with strings
-        if op == "LIKE":
-            if field_type not in ("str", "string", "text", "varchar"):
-                raise TypeMismatchError(
-                    f"LIKE operator requires string field, got '{field_type}'"
-                )
-            if not isinstance(value, str):
-                raise TypeMismatchError(
-                    f"LIKE operator requires string value, got {type(value).__name__}"
-                )
-
-        # Comparison operators (>, >=, <, <=) require numeric types
-        elif op in (">", ">=", "<", "<="):
-            if field_type not in ("int", "integer", "float", "double", "decimal", "numeric"):
-                raise TypeMismatchError(
-                    f"Comparison operator '{op}' requires numeric field, got '{field_type}'"
-                )
-            # Value could be a dict (field reference) or a number
-            if not isinstance(value, (int, float, dict)):
-                raise TypeMismatchError(
-                    f"Comparison operator '{op}' requires numeric value, "
-                    f"got {type(value).__name__}"
-                )
-
-        # IN operator
-        elif op == "IN":
-            if not isinstance(value, list):
-                raise TypeMismatchError(
-                    f"IN operator requires list value, got {type(value).__name__}"
-                )
-
-            # Check that list values match field type
-            if field_type in ("int", "integer"):
-                for v in value:
-                    if not isinstance(v, int):
-                        raise TypeMismatchError(
-                            f"IN operator with integer field requires integer values, "
-                            f"got {type(v).__name__}"
-                        )
-            elif field_type in ("float", "double", "decimal", "numeric"):
-                for v in value:
-                    if not isinstance(v, (int, float)):
-                        raise TypeMismatchError(
-                            f"IN operator with numeric field requires numeric values, "
-                            f"got {type(v).__name__}"
-                        )
-
-        # Equality operators (=, !=) are generally permissive but we can add checks
-        # For field references (dict values), skip value type checking
-
-
-def validate_query_ir(query_ir: QueryIR, schema: Dict[str, Dict[str, str]]) -> None:
-    """
-    Convenience function to validate a QueryIR against a schema.
-
-    Args:
-        query_ir: The QueryIR to validate
-        schema: Database schema definition
-
-    Raises:
-        ValidationError: If validation fails
-    """
-    validator = IRValidator(schema)
-    validator.validate(query_ir)
+            # Recursively validate nested conditions
+            for condition in filter_expr.conditions:
+                cond_errors = self._validate_filters(condition, available_tables)
+                errors.extend(cond_errors)
+        
+        return errors
+    
+    def _validate_order_by(self, order_expressions: List[OrderExpr], available_tables: Set[str]) -> List[str]:
+        """Validate ORDER BY clause."""
+        errors = []
+        
+        for expr in order_expressions:
+            target_table = expr.table
+            field_name = expr.field
+            
+            if target_table is None:
+                matching_tables = [t for t in available_tables 
+                                  if self._column_exists(t, field_name)]
+                if len(matching_tables) == 0:
+                    error_msg = f"ORDER BY column '{field_name}' not found in any available table"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+            else:
+                if target_table not in available_tables:
+                    error_msg = f"ORDER BY column '{field_name}' references unavailable table '{target_table}'"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+                elif not self._column_exists(target_table, field_name):
+                    available_cols = set(self.schema.get(target_table, {}).get("columns", {}).keys())
+                    error_msg = f"ORDER BY column '{field_name}' does not exist in table '{target_table}'. Available: {', '.join(sorted(available_cols))}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
+        
+        return errors
+    
+    def _validate_operator_type(self, condition: ConditionExpr, table: str):
+        """Validate that the operator is compatible with the column type."""
+        schema = self.schema.get(table, {})
+        columns = schema.get("columns", {})
+        col_info = columns.get(condition.field, {})
+        col_type = col_info.get("type", "").upper()
+        
+        logger.debug(f"Checking operator '{condition.op}' for column type '{col_type}'")
+        
+        # LIKE only works with string types
+        if condition.op == "LIKE":
+            if not any(t in col_type for t in ["CHAR", "VARCHAR", "TEXT"]):
+                error_msg = f"LIKE operator requires a string column, but '{condition.field}' is {col_type}"
+                logger.error(error_msg)
+        
+        # Comparison operators work best with numeric types
+        if condition.op in (">", ">=", "<", "<="):
+            if not any(t in col_type for t in ["INT", "BIGINT", "FLOAT", "DOUBLE", "DECIMAL"]):
+                logger.warning(f"Comparison operator '{condition.op}' on non-numeric column '{condition.field}' ({col_type})")
+        
+        # IN operator validation
+        if condition.op == "IN":
+            if isinstance(condition.value, list) and len(condition.value) > 0:
+                first_val = condition.value[0]
+                val_type = type(first_val).__name__.upper()
+                if any(t in col_type for t in ["INT", "BIGINT"]):
+                    if not isinstance(first_val, (int, float)):
+                        logger.warning(f"IN operator on numeric column '{condition.field}' with non-numeric value")
+                elif any(t in col_type for t in ["CHAR", "VARCHAR", "TEXT"]):
+                    if not isinstance(first_val, str):
+                        logger.warning(f"IN operator on string column '{condition.field}' with non-string value")
+    
+    def _column_exists(self, table: str, column: str) -> bool:
+        """Check if a column exists in a table."""
+        schema = self.schema.get(table, {})
+        columns = schema.get("columns", {})
+        return column in columns
+    
+    def _get_available_tables(self, source_table: str, joins: List[JoinExpr] | None) -> Set[str]:
+        """Get all tables available for field references."""
+        tables = {source_table}
+        if joins:
+            for join in joins:
+                tables.add(join.table)
+        return tables

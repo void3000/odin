@@ -1,4 +1,8 @@
-"""Intermediate Representation (IR) module"""
+"""
+Intermediate Representation (IR) module.
+
+Provides data models, parsing, and validation for query IR.
+"""
 
 from .models import (
     QueryIR,
@@ -10,6 +14,8 @@ from .models import (
     FilterExpr,
     OrderExpr,
 )
+from .parser import IRParser
+from .validator import IRValidator
 
 __all__ = [
     "QueryIR",
@@ -20,4 +26,6 @@ __all__ = [
     "LogicalExpr",
     "FilterExpr",
     "OrderExpr",
+    "IRParser",
+    "IRValidator",
 ]
