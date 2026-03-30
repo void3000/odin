@@ -10,6 +10,7 @@ Coordinates the complete query processing pipeline:
 """
 
 import logging
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.ir.models import QueryIR
@@ -87,43 +88,54 @@ class QueryOrchestrator:
         }
 
         try:
+            timings = {}
+
             # Stage 1: Parse natural language to IR
             logger.info("Stage 1: Parsing natural language to IR...")
+            t0 = time.perf_counter()
             parse_result = self.parser.parse(natural_language)
+            timings["parse_ms"] = (time.perf_counter() - t0) * 1000
 
             if not parse_result["success"]:
                 result["error"] = parse_result["error"]
                 result["metadata"]["stage"] = "parse"
+                result["metadata"]["timings"] = timings
                 logger.error(f"Parse failed: {parse_result['error']}")
                 return result
 
             query_ir = parse_result["data"]
             result["metadata"]["ir"] = query_ir.model_dump()
-            logger.info("Stage 1 complete: IR parsed successfully")
+            logger.info(f"Stage 1 complete: IR parsed successfully ({timings['parse_ms']:.0f}ms)")
 
             # Stage 2: Validate IR against schema
             logger.info("Stage 2: Validating IR against schema...")
+            t0 = time.perf_counter()
             validation_errors = self.validator.validate_query(query_ir)
+            timings["validate_ms"] = (time.perf_counter() - t0) * 1000
 
             if validation_errors:
                 error_msg = "Validation failed:\n" + "\n".join(f"- {e}" for e in validation_errors)
                 result["error"] = error_msg
                 result["metadata"]["stage"] = "validate"
+                result["metadata"]["timings"] = timings
                 logger.error(error_msg)
                 return result
 
-            logger.info("Stage 2 complete: IR validated successfully")
+            logger.info(f"Stage 2 complete: IR validated successfully ({timings['validate_ms']:.0f}ms)")
 
             # Stage 3: Build SQL from IR
             logger.info("Stage 3: Building SQL from IR...")
+            t0 = time.perf_counter()
             sql, params = self.builder.build(query_ir)
+            timings["build_ms"] = (time.perf_counter() - t0) * 1000
             result["metadata"]["sql"] = sql
             result["metadata"]["params"] = params
             logger.debug(f"Generated SQL: {sql}")
-            logger.info("Stage 3 complete: SQL built successfully")
+            logger.info(f"Stage 3 complete: SQL built successfully ({timings['build_ms']:.0f}ms)")
 
             # Stage 4: Execute SQL query
             logger.info("Stage 4: Executing SQL query...")
+            t0 = time.perf_counter()
             connector = SQLiteConnector(database=self.db_path)
             try:
                 connector.connect()
@@ -135,32 +147,41 @@ class QueryOrchestrator:
                     for row in raw_result.rows
                 ]
             except DatabaseError as e:
+                timings["execute_ms"] = (time.perf_counter() - t0) * 1000
                 result["error"] = str(e)
                 result["metadata"]["stage"] = "execute"
+                result["metadata"]["timings"] = timings
                 logger.error(f"Execution failed: {e}")
                 return result
             finally:
                 connector.disconnect()
+            timings["execute_ms"] = (time.perf_counter() - t0) * 1000
 
             result["metadata"]["row_count"] = len(exec_result)
-            logger.info(f"Stage 4 complete: Query executed successfully, returned {len(exec_result)} rows")
+            logger.info(f"Stage 4 complete: Query executed successfully, returned {len(exec_result)} rows ({timings['execute_ms']:.0f}ms)")
 
             # Stage 5: Summarize results using LLM
             logger.info("Stage 5: Summarizing results...")
+            t0 = time.perf_counter()
             summ_success, summary = self.summarizer.summarize(
                 natural_language, exec_result, sql
             )
+            timings["summarize_ms"] = (time.perf_counter() - t0) * 1000
 
             if not summ_success:
                 result["error"] = summary
                 result["metadata"]["stage"] = "summarize"
+                result["metadata"]["timings"] = timings
                 logger.error(f"Summarization failed: {summary}")
                 return result
 
+            timings["total_ms"] = sum(timings.values())
             result["success"] = True
             result["summary"] = summary
             result["metadata"]["stage"] = "complete"
-            logger.info("Stage 5 complete: Results summarized successfully")
+            result["metadata"]["timings"] = timings
+            logger.info(f"Stage 5 complete: Results summarized successfully ({timings['summarize_ms']:.0f}ms)")
+            logger.info(f"Total pipeline time: {timings['total_ms']:.0f}ms")
 
         except Exception as e:
             error_msg = f"Unexpected error in orchestrator: {str(e)}"
