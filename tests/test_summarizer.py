@@ -70,3 +70,77 @@ class TestResultSummarizer:
 
         assert "How many orders?" in user_message
         assert "42" in user_message
+
+
+from src.orchestrator import QueryOrchestrator
+
+
+class TestOrchestratorSummarization:
+    """Tests for summarization integration in QueryOrchestrator."""
+
+    def setup_method(self):
+        """Set up orchestrator with mocked components."""
+        self.mock_llm = MagicMock()
+        self.schema = {
+            "users": {
+                "columns": {"id": {"type": "INTEGER"}, "name": {"type": "TEXT"}},
+                "primary_key": "id",
+            }
+        }
+
+    def test_process_query_returns_summary(self, tmp_path):
+        """Successful query returns summary instead of raw data."""
+        db_path = str(tmp_path / "test.db")
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE users (id INTEGER, name TEXT)")
+        conn.execute("INSERT INTO users VALUES (1, 'Alice')")
+        conn.commit()
+        conn.close()
+
+        # First call: IR parsing, Second call: summarization
+        self.mock_llm.generate.side_effect = [
+            (True, '{"operation": "SELECT", "source": {"table": "users"}, "fields": [{"field": "name"}]}'),
+            (True, "There is 1 user: Alice."),
+        ]
+
+        orchestrator = QueryOrchestrator(
+            db_path=db_path,
+            llm_client=self.mock_llm,
+            system_prompt="parse",
+            schema=self.schema,
+        )
+
+        result = orchestrator.process_query("Show me all users")
+
+        assert result["success"] is True
+        assert result["summary"] == "There is 1 user: Alice."
+        assert "data" not in result
+
+    def test_process_query_summarize_failure(self, tmp_path):
+        """Summarization failure returns error with stage."""
+        db_path = str(tmp_path / "test.db")
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE users (id INTEGER, name TEXT)")
+        conn.execute("INSERT INTO users VALUES (1, 'Alice')")
+        conn.commit()
+        conn.close()
+
+        self.mock_llm.generate.side_effect = [
+            (True, '{"operation": "SELECT", "source": {"table": "users"}, "fields": [{"field": "name"}]}'),
+            (False, "API error"),
+        ]
+
+        orchestrator = QueryOrchestrator(
+            db_path=db_path,
+            llm_client=self.mock_llm,
+            system_prompt="parse",
+            schema=self.schema,
+        )
+
+        result = orchestrator.process_query("Show me all users")
+
+        assert result["success"] is False
+        assert result["error"] == "API error"
+        assert result["metadata"]["stage"] == "summarize"

@@ -6,16 +6,18 @@ Coordinates the complete query processing pipeline:
 2. Validate IR against schema
 3. Build SQL from validated IR
 4. Execute SQL and return results
+5. Summarize results using LLM
 """
 
 import logging
+import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.ir.models import QueryIR
 from src.ir.parser import IRParser
 from src.ir.validator import IRValidator
 from src.query_builder import SQLBuilder
-from src.executor import QueryExecutor
+from src.summarizer import ResultSummarizer
 from src.logging_config import get_component_logger
 
 logger = get_component_logger("orchestrator")
@@ -24,14 +26,15 @@ logger = get_component_logger("orchestrator")
 class QueryOrchestrator:
     """
     Orchestrates the complete query processing pipeline.
-    
+
     Pipeline stages:
         1. Parse: Natural language -> IR (using LLM)
         2. Validate: IR against database schema
         3. Build: IR -> SQL query
         4. Execute: SQL -> Results
+        5. Summarize: Results -> Natural language summary (using LLM)
     """
-    
+
     def __init__(
         self,
         db_path: str,
@@ -41,7 +44,7 @@ class QueryOrchestrator:
     ):
         """
         Initialize orchestrator with all pipeline components.
-        
+
         Args:
             db_path: Path to SQLite database
             llm_client: LLM client for parsing natural language
@@ -52,16 +55,16 @@ class QueryOrchestrator:
         self.llm_client = llm_client
         self.system_prompt = system_prompt
         self.schema = schema
-        
+
         # Initialize pipeline components
         self.parser = IRParser(llm_client, system_prompt)
         self.validator = IRValidator(schema)
         self.builder = SQLBuilder()
-        self.executor = QueryExecutor(db_path)
-        
+        self.summarizer = ResultSummarizer(llm_client)
+
         logger.info(f"QueryOrchestrator initialized for database: {db_path}")
         logger.debug(f"Schema contains {len(schema)} tables")
-    
+
     def process_query(
         self,
         natural_language: str,
@@ -69,50 +72,49 @@ class QueryOrchestrator:
     ) -> Dict[str, Any]:
         """
         Process a natural language query through the complete pipeline.
-        
+
         Args:
             natural_language: User's question in natural language
             return_format: "dict" for dict rows or "tuple" for tuple rows
-            
+
         Returns:
-            Dict with success status, data, and metadata
+            Dict with success status, summary, and metadata
         """
         logger.info(f"Processing query: {natural_language}")
         result = {
             "success": False,
-            "data": None,
             "error": None,
             "metadata": {}
         }
-        
+
         try:
             # Stage 1: Parse natural language to IR
             logger.info("Stage 1: Parsing natural language to IR...")
             parse_result = self.parser.parse(natural_language)
-            
+
             if not parse_result["success"]:
                 result["error"] = parse_result["error"]
                 result["metadata"]["stage"] = "parse"
                 logger.error(f"Parse failed: {parse_result['error']}")
                 return result
-            
+
             query_ir = parse_result["data"]
             result["metadata"]["ir"] = query_ir.model_dump()
             logger.info("Stage 1 complete: IR parsed successfully")
-            
+
             # Stage 2: Validate IR against schema
             logger.info("Stage 2: Validating IR against schema...")
             validation_errors = self.validator.validate_query(query_ir)
-            
+
             if validation_errors:
                 error_msg = "Validation failed:\n" + "\n".join(f"- {e}" for e in validation_errors)
                 result["error"] = error_msg
                 result["metadata"]["stage"] = "validate"
                 logger.error(error_msg)
                 return result
-            
+
             logger.info("Stage 2 complete: IR validated successfully")
-            
+
             # Stage 3: Build SQL from IR
             logger.info("Stage 3: Building SQL from IR...")
             sql, params = self.builder.build(query_ir)
@@ -120,34 +122,58 @@ class QueryOrchestrator:
             result["metadata"]["params"] = params
             logger.debug(f"Generated SQL: {sql}")
             logger.info("Stage 3 complete: SQL built successfully")
-            
+
             # Stage 4: Execute SQL query
             logger.info("Stage 4: Executing SQL query...")
-            exec_success, exec_result = self.executor.execute(sql, params, return_format)
-            
-            if not exec_success:
-                result["error"] = exec_result
+            try:
+                conn = sqlite3.connect(self.db_path)
+                if return_format == "dict":
+                    conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute(sql, params or [])
+                rows = cursor.fetchall()
+                conn.close()
+                if return_format == "dict":
+                    exec_result = [dict(row) for row in rows]
+                else:
+                    exec_result = [tuple(row) for row in rows]
+            except sqlite3.Error as e:
+                result["error"] = f"Database error: {str(e)}"
                 result["metadata"]["stage"] = "execute"
-                logger.error(f"Execution failed: {exec_result}")
+                logger.error(f"Execution failed: {e}")
                 return result
-            
-            result["success"] = True
-            result["data"] = exec_result
+
             result["metadata"]["row_count"] = len(exec_result)
-            result["metadata"]["stage"] = "complete"
             logger.info(f"Stage 4 complete: Query executed successfully, returned {len(exec_result)} rows")
-            
+
+            # Stage 5: Summarize results using LLM
+            logger.info("Stage 5: Summarizing results...")
+            summ_success, summary = self.summarizer.summarize(
+                natural_language, exec_result, sql
+            )
+
+            if not summ_success:
+                result["error"] = summary
+                result["metadata"]["stage"] = "summarize"
+                logger.error(f"Summarization failed: {summary}")
+                return result
+
+            result["success"] = True
+            result["summary"] = summary
+            result["metadata"]["stage"] = "complete"
+            logger.info("Stage 5 complete: Results summarized successfully")
+
         except Exception as e:
             error_msg = f"Unexpected error in orchestrator: {str(e)}"
             result["error"] = error_msg
             logger.error(error_msg, exc_info=True)
-        
+
         return result
-    
+
     def get_schema_summary(self) -> Dict[str, Any]:
         """
         Get a summary of the database schema.
-        
+
         Returns:
             Dict with table names and column counts
         """
