@@ -1,7 +1,7 @@
 """
 Query Orchestrator.
 
-Coordinates the complete query processing pipeline:
+Coordinates the complete query processing pipeline using Workflow steps:
 1. Parse natural language to IR
 2. Validate IR against schema
 3. Build SQL from validated IR
@@ -10,16 +10,19 @@ Coordinates the complete query processing pipeline:
 """
 
 import logging
-import time
 from typing import Any, Dict, List
 
-from src.ir.models import QueryIR
 from src.ir.parser import IRParser
-from src.ir.validator import IRValidator
-from src.query_builder import SQLBuilder
 from src.summarizer import ResultSummarizer
-from src.executor.connectors.sqlite import SQLiteConnector
-from src.executor.errors import DatabaseError
+from src.workflows import (
+    Workflow,
+    PipelineContext,
+    ParseWorkflow,
+    ValidateWorkflow,
+    BuildWorkflow,
+    ExecuteWorkflow,
+    SummarizeWorkflow,
+)
 from src.logging_config import get_component_logger
 
 logger = get_component_logger("orchestrator")
@@ -29,12 +32,8 @@ class QueryOrchestrator:
     """
     Orchestrates the complete query processing pipeline.
 
-    Pipeline stages:
-        1. Parse: Natural language -> IR (using LLM)
-        2. Validate: IR against database schema
-        3. Build: IR -> SQL query
-        4. Execute: SQL -> Results
-        5. Summarize: Results -> Natural language summary (using LLM)
+    Pipeline stages are Workflow instances chained together.
+    Each stage reads from and writes to a shared PipelineContext.
     """
 
     def __init__(
@@ -42,166 +41,71 @@ class QueryOrchestrator:
         db_path: str,
         llm_client: Any,
         system_prompt: str,
-        schema: Dict[str, Any]
+        schema: Dict[str, Any],
     ):
-        """
-        Initialize orchestrator with all pipeline components.
-
-        Args:
-            db_path: Path to SQLite database
-            llm_client: LLM client for parsing natural language
-            system_prompt: System prompt for the LLM parser
-            schema: Database schema from design document
-        """
         self.db_path = db_path
-        self.llm_client = llm_client
-        self.system_prompt = system_prompt
         self.schema = schema
 
-        # Initialize pipeline components
-        self.parser = IRParser(llm_client, system_prompt)
-        self.validator = IRValidator(schema)
-        self.builder = SQLBuilder()
-        self.summarizer = ResultSummarizer(llm_client)
+        parser = IRParser(llm_client, system_prompt)
+        summarizer = ResultSummarizer(llm_client)
+
+        self.steps: List[Workflow] = [
+            ParseWorkflow(parser),
+            ValidateWorkflow(),
+            BuildWorkflow(),
+            ExecuteWorkflow(db_path),
+            SummarizeWorkflow(summarizer),
+        ]
 
         logger.info(f"QueryOrchestrator initialized for database: {db_path}")
         logger.debug(f"Schema contains {len(schema)} tables")
 
-    def process_query(
-        self,
-        natural_language: str,
-    ) -> Dict[str, Any]:
-        """
-        Process a natural language query through the complete pipeline.
-
-        Args:
-            natural_language: User's question in natural language
-
-        Returns:
-            Dict with success status, summary, and metadata
-        """
+    def process_query(self, natural_language: str) -> Dict[str, Any]:
+        """Process a natural language query through the complete pipeline."""
         logger.info(f"Processing query: {natural_language}")
-        result = {
-            "success": False,
-            "error": None,
-            "metadata": {}
+
+        context = PipelineContext(
+            natural_language=natural_language,
+            db_path=self.db_path,
+            schema=self.schema,
+        )
+
+        for step in self.steps:
+            context = step.execute(context)
+            if context.error:
+                break
+
+        context.timings["total_ms"] = sum(context.timings.values())
+        return self._to_result_dict(context)
+
+    def _to_result_dict(self, context: PipelineContext) -> Dict[str, Any]:
+        """Convert PipelineContext to the existing result dict format."""
+        result: Dict[str, Any] = {
+            "success": context.error is None,
+            "error": context.error,
+            "metadata": {
+                "timings": context.timings,
+                "stage": context.failed_stage or "complete",
+            },
         }
-
-        try:
-            timings = {}
-
-            # Stage 1: Parse natural language to IR
-            logger.info("Stage 1: Parsing natural language to IR...")
-            t0 = time.perf_counter()
-            parse_result = self.parser.parse(natural_language)
-            timings["parse_ms"] = (time.perf_counter() - t0) * 1000
-
-            if not parse_result["success"]:
-                result["error"] = parse_result["error"]
-                result["metadata"]["stage"] = "parse"
-                result["metadata"]["timings"] = timings
-                logger.error(f"Parse failed: {parse_result['error']}")
-                return result
-
-            query_ir = parse_result["data"]
-            result["metadata"]["ir"] = query_ir.model_dump()
-            logger.info(f"Stage 1 complete: IR parsed successfully ({timings['parse_ms']:.0f}ms)")
-
-            # Stage 2: Validate IR against schema
-            logger.info("Stage 2: Validating IR against schema...")
-            t0 = time.perf_counter()
-            validation_errors = self.validator.validate_query(query_ir)
-            timings["validate_ms"] = (time.perf_counter() - t0) * 1000
-
-            if validation_errors:
-                error_msg = "Validation failed:\n" + "\n".join(f"- {e}" for e in validation_errors)
-                result["error"] = error_msg
-                result["metadata"]["stage"] = "validate"
-                result["metadata"]["timings"] = timings
-                logger.error(error_msg)
-                return result
-
-            logger.info(f"Stage 2 complete: IR validated successfully ({timings['validate_ms']:.0f}ms)")
-
-            # Stage 3: Build SQL from IR
-            logger.info("Stage 3: Building SQL from IR...")
-            t0 = time.perf_counter()
-            sql, params = self.builder.build(query_ir)
-            timings["build_ms"] = (time.perf_counter() - t0) * 1000
-            result["metadata"]["sql"] = sql
-            result["metadata"]["params"] = params
-            logger.debug(f"Generated SQL: {sql}")
-            logger.info(f"Stage 3 complete: SQL built successfully ({timings['build_ms']:.0f}ms)")
-
-            # Stage 4: Execute SQL query
-            logger.info("Stage 4: Executing SQL query...")
-            t0 = time.perf_counter()
-            connector = SQLiteConnector(database=self.db_path)
-            try:
-                connector.connect()
-                raw_result = connector.execute_query(
-                    {"sql": sql, "params": params or []}
-                )
-                exec_result = [
-                    dict(zip(raw_result.columns, row))
-                    for row in raw_result.rows
-                ]
-            except DatabaseError as e:
-                timings["execute_ms"] = (time.perf_counter() - t0) * 1000
-                result["error"] = str(e)
-                result["metadata"]["stage"] = "execute"
-                result["metadata"]["timings"] = timings
-                logger.error(f"Execution failed: {e}")
-                return result
-            finally:
-                connector.disconnect()
-            timings["execute_ms"] = (time.perf_counter() - t0) * 1000
-
-            result["metadata"]["row_count"] = len(exec_result)
-            logger.info(f"Stage 4 complete: Query executed successfully, returned {len(exec_result)} rows ({timings['execute_ms']:.0f}ms)")
-
-            # Stage 5: Summarize results using LLM
-            logger.info("Stage 5: Summarizing results...")
-            t0 = time.perf_counter()
-            summ_success, summary = self.summarizer.summarize(
-                natural_language, exec_result, sql
-            )
-            timings["summarize_ms"] = (time.perf_counter() - t0) * 1000
-
-            if not summ_success:
-                result["error"] = summary
-                result["metadata"]["stage"] = "summarize"
-                result["metadata"]["timings"] = timings
-                logger.error(f"Summarization failed: {summary}")
-                return result
-
-            timings["total_ms"] = sum(timings.values())
-            result["success"] = True
-            result["summary"] = summary
-            result["metadata"]["stage"] = "complete"
-            result["metadata"]["timings"] = timings
-            logger.info(f"Stage 5 complete: Results summarized successfully ({timings['summarize_ms']:.0f}ms)")
-            logger.info(f"Total pipeline time: {timings['total_ms']:.0f}ms")
-
-        except Exception as e:
-            error_msg = f"Unexpected error in orchestrator: {str(e)}"
-            result["error"] = error_msg
-            logger.error(error_msg, exc_info=True)
-
+        if context.query_ir:
+            result["metadata"]["ir"] = context.query_ir.model_dump()
+        if context.sql:
+            result["metadata"]["sql"] = context.sql
+            result["metadata"]["params"] = context.params
+        if context.rows is not None:
+            result["metadata"]["row_count"] = len(context.rows)
+        if context.summary:
+            result["summary"] = context.summary
         return result
 
     def get_schema_summary(self) -> Dict[str, Any]:
-        """
-        Get a summary of the database schema.
-
-        Returns:
-            Dict with table names and column counts
-        """
+        """Get a summary of the database schema."""
         summary = {}
         for table_name, table_info in self.schema.items():
             columns = table_info.get("columns", {})
             summary[table_name] = {
                 "column_count": len(columns),
-                "columns": list(columns.keys())
+                "columns": list(columns.keys()),
             }
         return summary
