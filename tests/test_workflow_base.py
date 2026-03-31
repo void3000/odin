@@ -80,3 +80,9 @@ class TestWorkflow:
     def test_workflow_is_abstract(self):
         with pytest.raises(TypeError):
             Workflow()
+
+    def test_subclass_without_name_raises(self):
+        with pytest.raises(TypeError, match="must define a class attribute 'name'"):
+            class _NoNameWorkflow(Workflow):
+                def run(self, context):
+                    return context

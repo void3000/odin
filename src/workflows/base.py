@@ -1,6 +1,5 @@
 """Workflow base class and PipelineContext for the query pipeline."""
 
-import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -38,6 +37,11 @@ class Workflow(ABC):
     """Abstract base class for pipeline workflow steps."""
 
     name: str
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        if ABC not in cls.__bases__ and not hasattr(cls, "name"):
+            raise TypeError(f"{cls.__name__} must define a class attribute 'name'")
 
     def execute(self, context: PipelineContext) -> PipelineContext:
         """Run the workflow with timing and error handling."""
