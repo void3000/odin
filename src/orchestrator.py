@@ -11,7 +11,7 @@ Coordinates the complete query processing pipeline:
 
 import logging
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 from src.ir.models import QueryIR
 from src.ir.parser import IRParser

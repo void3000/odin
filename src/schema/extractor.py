@@ -92,23 +92,18 @@ class SQLiteSchemaExtractor:
 
         sqlite_type = sqlite_type.upper()
 
-        # Integer types
         if any(t in sqlite_type for t in ["INT", "INTEGER", "TINYINT", "SMALLINT", "MEDIUMINT", "BIGINT"]):
             return "int"
 
-        # Float types
         if any(t in sqlite_type for t in ["REAL", "DOUBLE", "FLOAT", "NUMERIC", "DECIMAL"]):
             return "float"
 
-        # Boolean
         if "BOOL" in sqlite_type:
             return "bool"
 
-        # Date/Time
         if "DATE" in sqlite_type:
             return "date"
         if "TIME" in sqlite_type or "TIMESTAMP" in sqlite_type:
             return "datetime"
 
-        # Default to string
         return "str"

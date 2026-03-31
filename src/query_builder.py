@@ -5,6 +5,7 @@ Converts validated IR (Intermediate Representation) structures into executable S
 Supports SELECT statements with JOIN, WHERE, ORDER BY, and LIMIT clauses.
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Tuple, Union
 
@@ -40,7 +41,7 @@ class SQLBuilder:
             Tuple of (sql_string, parameters_list)
         """
         logger.info(f"Building SQL for query on table: {query_ir.source.table}")
-        logger.debug(f"QueryIR: {query_ir.model_dump()}")
+        logger.debug("QueryIR:\n%s", json.dumps(query_ir.model_dump(), indent=2, default=str))
         
         # Build SELECT clause
         select_clause = self._build_select(query_ir.fields)

@@ -54,9 +54,16 @@ from src.orchestrator import QueryOrchestrator
 
 
 def main():
-    db_path = "/home/void-3000/.local/share/DBeaverData/workspace6/.metadata/sample-database-sqlite-1/Chinook.db"
+    import argparse
 
-    logger.info("Odin LLM-to-SQL Pipeline - SQLite Chinook Database Demo")
+    parser = argparse.ArgumentParser(description="Odin LLM-to-SQL Pipeline")
+    parser.add_argument("--db", required=True, help="Path to SQLite database file")
+    parser.add_argument("--query", action="append", help="Natural language query (can be repeated)")
+    args = parser.parse_args()
+
+    db_path = args.db
+
+    logger.info("Odin LLM-to-SQL Pipeline")
 
     # Extract database schema
     logger.info(f"Connecting to: {db_path}")
@@ -70,7 +77,7 @@ def main():
     llm_client = LLMClient(
         base_url="http://localhost:1234/v1",
         api_key="lmstudio",
-        model="qwen3.5-27b-claude-4.6-opus-reasoning-distilled",
+        model="nvidia/nemotron-3-nano-4b",
         temperature=0.1,
     )
     logger.info("LM Studio ready (http://localhost:1234)")
@@ -96,7 +103,7 @@ def main():
     )
 
     # Run natural language queries
-    queries = [
+    queries = args.query or [
         "Show me all artists",
         "Find AC/DC's albums",
         "Show rock tracks longer than 5 minutes",
@@ -107,7 +114,12 @@ def main():
         logger.info(f"Query: \"{nl_query}\"")
 
         result = orchestrator.process_query(nl_query)
-        logger.info(json.dumps(result, indent=2, default=str))
+        logger.debug("Result:\n%s", json.dumps(result, indent=2, default=str))
+
+        if result["success"]:
+            logger.info(result["summary"])
+        else:
+            logger.error(f"Failed at stage '{result['metadata'].get('stage')}': {result['error']}")
 
     logger.info("")
     logger.info("All queries completed!")
