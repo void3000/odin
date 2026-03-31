@@ -83,18 +83,7 @@ class QueryOrchestrator:
         result: Dict[str, Any] = {
             "success": context.error is None,
             "error": context.error,
-            "metadata": {
-                "timings": context.timings,
-                "stage": context.failed_stage or "complete",
-            },
         }
-        if context.query_ir:
-            result["metadata"]["ir"] = context.query_ir.model_dump()
-        if context.sql:
-            result["metadata"]["sql"] = context.sql
-            result["metadata"]["params"] = context.params
-        if context.rows is not None:
-            result["metadata"]["row_count"] = len(context.rows)
         if context.summary:
             result["summary"] = context.summary
         return result
