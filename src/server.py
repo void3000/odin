@@ -7,19 +7,44 @@ The orchestrator runs query processing in a thread to avoid blocking the event l
 
 import asyncio
 import argparse
+import time
 import uuid
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.llm_client import LLMClient
 from src.llm.nl_to_ir import NaturalLanguageToIR
 from src.schema.extractor import SQLiteSchemaExtractor
 from src.orchestrator import QueryOrchestrator
-from src.logging_config import get_uvicorn_log_config, request_id_var, setup_logging
+from src.logging_config import get_component_logger, get_uvicorn_log_config, request_id_var
+
+logger = get_component_logger("server")
+
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    """Assigns a unique request ID and logs request lifecycle."""
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        request_id = str(uuid.uuid4())
+        request_id_var.set(request_id)
+
+        logger.info(f"{request.method} {request.url.path}")
+        start = time.perf_counter()
+
+        response = await call_next(request)
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.info(f"{request.method} {request.url.path} → {response.status_code} ({elapsed_ms:.0f}ms)")
+
+        response.headers["X-Request-ID"] = request_id
+        return response
+
 
 app = FastAPI(title="Odin", description="LLM-to-SQL Pipeline")
+app.add_middleware(RequestIdMiddleware)
 
 
 orchestrator: Optional[QueryOrchestrator] = None
@@ -39,7 +64,6 @@ def create_app(
 ) -> FastAPI:
     """Create and configure the FastAPI app with an orchestrator."""
     global orchestrator
-    setup_logging()
 
     schema_extractor = SQLiteSchemaExtractor(db_url)
     schema = schema_extractor.extract_schema()
@@ -74,10 +98,7 @@ def create_app(
 
 @app.post("/v1/query")
 async def query(request: QueryRequest) -> Dict[str, Any]:
-    request_id = str(uuid.uuid4())
-    request_id_var.set(request_id)
     result = await asyncio.to_thread(orchestrator.process_query, request.question)
-    result["request_id"] = request_id
     return result
 
 
