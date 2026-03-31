@@ -7,6 +7,7 @@ The orchestrator runs query processing in a thread to avoid blocking the event l
 
 import asyncio
 import argparse
+import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI
@@ -16,7 +17,7 @@ from src.llm_client import LLMClient
 from src.llm.nl_to_ir import NaturalLanguageToIR
 from src.schema.extractor import SQLiteSchemaExtractor
 from src.orchestrator import QueryOrchestrator
-from src.logging_config import get_uvicorn_log_config, setup_logging
+from src.logging_config import get_uvicorn_log_config, request_id_var, setup_logging
 
 app = FastAPI(title="Odin", description="LLM-to-SQL Pipeline")
 
@@ -73,7 +74,10 @@ def create_app(
 
 @app.post("/v1/query")
 async def query(request: QueryRequest) -> Dict[str, Any]:
+    request_id = str(uuid.uuid4())
+    request_id_var.set(request_id)
     result = await asyncio.to_thread(orchestrator.process_query, request.question)
+    result["request_id"] = request_id
     return result
 
 

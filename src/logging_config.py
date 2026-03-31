@@ -8,9 +8,20 @@ Environment Variables:
     ODIN_LOG_FILE: Path to log file (if set, logs go to file too)
 """
 
+import contextvars
 import logging
 import os
 from typing import Optional
+
+request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
+
+
+class RequestIdFilter(logging.Filter):
+    """Injects request_id from contextvars into every log record."""
+
+    def filter(self, record):
+        record.request_id = request_id_var.get()
+        return True
 
 
 def get_log_level() -> int:
@@ -36,7 +47,7 @@ def get_log_format() -> str:
     
     # Default format with timestamp, level, logger name, and message
     return (
-        "%(asctime)s [%(levelname)-8s] %(name)s: %(message)s"
+        "%(asctime)s [%(levelname)-8s] [%(request_id)s] %(name)s: %(message)s"
     )
 
 
@@ -67,10 +78,11 @@ def setup_logging(
     
     # Clear existing handlers to avoid duplicates on re-import
     root_logger.handlers.clear()
-    
+
     # Console handler (always enabled)
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
+    console_handler.addFilter(RequestIdFilter())
     root_logger.addHandler(console_handler)
     
     # File handler (if log file specified)
@@ -79,6 +91,7 @@ def setup_logging(
             os.makedirs(os.path.dirname(log_file), exist_ok=True)
             file_handler = logging.FileHandler(log_file, mode='a')
             file_handler.setFormatter(formatter)
+            file_handler.addFilter(RequestIdFilter())
             root_logger.addHandler(file_handler)
         except OSError as e:
             # If we can't create the log file, just warn and continue with console
@@ -109,6 +122,9 @@ def get_uvicorn_log_config() -> dict:
     return {
         "version": 1,
         "disable_existing_loggers": False,
+        "filters": {
+            "request_id": {"()": lambda: RequestIdFilter()},
+        },
         "formatters": {
             "odin": {"format": log_format},
         },
@@ -117,6 +133,7 @@ def get_uvicorn_log_config() -> dict:
                 "formatter": "odin",
                 "class": "logging.StreamHandler",
                 "stream": "ext://sys.stderr",
+                "filters": ["request_id"],
             },
         },
         "loggers": {

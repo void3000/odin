@@ -9,7 +9,6 @@ Coordinates the complete query processing pipeline using Workflow steps:
 5. Summarize results using LLM
 """
 
-import logging
 from typing import Any, Dict, List
 
 from src.ir.parser import IRParser
