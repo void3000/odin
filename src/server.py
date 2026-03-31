@@ -9,9 +9,10 @@ import asyncio
 import argparse
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -97,9 +98,10 @@ def create_app(
 
 
 @app.post("/v1/query")
-async def query(request: QueryRequest) -> Dict[str, Any]:
+async def query(request: QueryRequest):
     result = await asyncio.to_thread(orchestrator.process_query, request.question)
-    return result
+    status_code = 200 if result.get("success") else 500
+    return JSONResponse(content=result, status_code=status_code)
 
 
 if __name__ == "__main__":
