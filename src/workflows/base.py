@@ -17,7 +17,7 @@ class PipelineContext:
 
     # Input (set before pipeline starts)
     natural_language: str
-    db_path: str
+    db_url: str
     schema: Dict[str, Any]
 
     # Stage outputs

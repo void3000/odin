@@ -57,18 +57,18 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Odin LLM-to-SQL Pipeline")
-    parser.add_argument("--db", required=True, help="Path to SQLite database file")
+    parser.add_argument("--db", required=True, help="Database connection string")
     parser.add_argument("--query", action="append", help="Natural language query (can be repeated)")
     args = parser.parse_args()
 
-    db_path = args.db
+    db_url = args.db
 
     logger.info("Odin LLM-to-SQL Pipeline")
 
     # Extract database schema
-    logger.info(f"Connecting to: {db_path}")
+    logger.info(f"Connecting to: {db_url}")
     logger.info("Extracting database schema...")
-    schema_extractor = SQLiteSchemaExtractor(db_path)
+    schema_extractor = SQLiteSchemaExtractor(db_url)
     schema = schema_extractor.extract_schema()
     logger.info(f"Found {len(schema.tables)} tables")
 
@@ -96,7 +96,7 @@ def main():
 
     # Initialize orchestrator
     orchestrator = QueryOrchestrator(
-        db_path=db_path,
+        db_url=db_url,
         llm_client=llm_client,
         system_prompt=system_prompt,
         schema=validator_schema,

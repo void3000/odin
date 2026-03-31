@@ -8,11 +8,11 @@ from src.workflows.base import Workflow, PipelineContext
 class ExecuteWorkflow(Workflow):
     name = "execute"
 
-    def __init__(self, db_path: str):
-        self.db_path = db_path
+    def __init__(self, db_url: str):
+        self.db_url = db_url
 
     def run(self, context: PipelineContext) -> PipelineContext:
-        connector = SQLiteConnector(database=self.db_path)
+        connector = SQLiteConnector(database=self.db_url)
         try:
             connector.connect()
             raw = connector.execute_query(

@@ -38,13 +38,13 @@ class QueryOrchestrator:
 
     def __init__(
         self,
-        db_path: str,
+        db_url: str,
         llm_client: Any,
         system_prompt: str,
         schema: Dict[str, Any],
         default_limit: int = 100,
     ):
-        self.db_path = db_path
+        self.db_url = db_url
         self.schema = schema
 
         parser = IRParser(llm_client, system_prompt)
@@ -54,11 +54,11 @@ class QueryOrchestrator:
             ParseWorkflow(parser),
             ValidateWorkflow(),
             BuildWorkflow(default_limit=default_limit),
-            ExecuteWorkflow(db_path),
+            ExecuteWorkflow(db_url),
             SummarizeWorkflow(summarizer),
         ]
 
-        logger.info(f"QueryOrchestrator initialized for database: {db_path}")
+        logger.info(f"QueryOrchestrator initialized for database: {db_url}")
         logger.debug(f"Schema contains {len(schema)} tables")
 
     def process_query(self, natural_language: str) -> Dict[str, Any]:
@@ -67,7 +67,7 @@ class QueryOrchestrator:
 
         context = PipelineContext(
             natural_language=natural_language,
-            db_path=self.db_path,
+            db_url=self.db_url,
             schema=self.schema,
         )
 

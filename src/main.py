@@ -34,7 +34,7 @@ class Text2SQL:
     
     def __init__(
         self,
-        db_path: str,
+        db_url: str,
         design_document_path: Optional[str] = None,
         api_key: Optional[str] = None,
         model: str = "gpt-4o-mini",
@@ -44,17 +44,17 @@ class Text2SQL:
         Initialize Text2SQL system.
         
         Args:
-            db_path: Path to SQLite database file
+            db_url: Database connection string
             design_document_path: Optional path to design document (auto-detected if not provided)
             api_key: OpenAI API key (uses OPENAI_API_KEY env var if not provided)
             model: LLM model to use for parsing
             temperature: Temperature for LLM generation (lower = more deterministic)
         """
-        self.db_path = db_path
+        self.db_url = db_url
         
         # Auto-detect design document if not specified
         if design_document_path is None:
-            design_document_path = os.path.splitext(db_path)[0] + ".md"
+            design_document_path = os.path.splitext(db_url)[0] + ".md"
         
         self.design_document_path = design_document_path
         
@@ -67,7 +67,7 @@ class Text2SQL:
             )
         
         self.llm_client = LLMClient(api_key, model=model, temperature=temperature)
-        logger.info(f"Text2SQL initialized for database: {db_path}")
+        logger.info(f"Text2SQL initialized for database: {db_url}")
         logger.debug(f"Using model: {model}, temperature: {temperature}")
     
     def query(self, question: str) -> Dict[str, Any]:
@@ -101,7 +101,7 @@ class Text2SQL:
             
             # Initialize orchestrator
             orchestrator = QueryOrchestrator(
-                db_path=self.db_path,
+                db_url=self.db_url,
                 llm_client=self.llm_client,
                 system_prompt=system_prompt,
                 schema=schema
@@ -216,7 +216,7 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description="Text2SQL - Natural Language to SQL")
-    parser.add_argument("--db", required=True, help="Path to SQLite database file")
+    parser.add_argument("--db", required=True, help="Database connection string")
     parser.add_argument("--doc", help="Path to design document (auto-detected if not provided)")
     parser.add_argument("--key", help="OpenAI API key (uses OPENAI_API_KEY env var if not provided)")
     parser.add_argument("--model", default="gpt-4o-mini", help="LLM model to use")
@@ -228,7 +228,7 @@ def main():
     # Initialize Text2SQL
     try:
         text2sql = Text2SQL(
-            db_path=args.db,
+            db_url=args.db,
             design_document_path=args.doc,
             api_key=args.key,
             model=args.model,

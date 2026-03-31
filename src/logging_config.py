@@ -15,7 +15,7 @@ from typing import Optional
 
 def get_log_level() -> int:
     """Get log level from environment variable."""
-    level_str = os.environ.get("ODIN_LOG_LEVEL", "WARNING").upper()
+    level_str = os.environ.get("ODIN_LOG_LEVEL", "INFO").upper()
     
     level_map = {
         "DEBUG": logging.DEBUG,
@@ -98,6 +98,33 @@ def get_component_logger(component_name: str) -> logging.Logger:
         Logger instance with name 'odin.{component_name}'
     """
     return logging.getLogger(f"odin.{component_name}")
+
+
+def get_uvicorn_log_config() -> dict:
+    """Return a uvicorn log config dict that matches Odin's format."""
+    log_format = get_log_format()
+    level = get_log_level()
+    level_name = logging.getLevelName(level)
+
+    return {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "odin": {"format": log_format},
+        },
+        "handlers": {
+            "default": {
+                "formatter": "odin",
+                "class": "logging.StreamHandler",
+                "stream": "ext://sys.stderr",
+            },
+        },
+        "loggers": {
+            "uvicorn": {"handlers": ["default"], "level": level_name, "propagate": False},
+            "uvicorn.error": {"handlers": ["default"], "level": level_name, "propagate": False},
+            "uvicorn.access": {"handlers": ["default"], "level": level_name, "propagate": False},
+        },
+    }
 
 
 # Initialize root logger on module import

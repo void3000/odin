@@ -16,8 +16,10 @@ from src.llm_client import LLMClient
 from src.llm.nl_to_ir import NaturalLanguageToIR
 from src.schema.extractor import SQLiteSchemaExtractor
 from src.orchestrator import QueryOrchestrator
+from src.logging_config import get_uvicorn_log_config, setup_logging
 
 app = FastAPI(title="Odin", description="LLM-to-SQL Pipeline")
+
 
 orchestrator: Optional[QueryOrchestrator] = None
 
@@ -27,7 +29,7 @@ class QueryRequest(BaseModel):
 
 
 def create_app(
-    db_path: str,
+    db_url: str,
     llm_base_url: str = "http://localhost:1234/v1",
     llm_api_key: str = "lmstudio",
     llm_model: str = "qwen3.5-27b-claude-4.6-opus-reasoning-distilled",
@@ -36,8 +38,9 @@ def create_app(
 ) -> FastAPI:
     """Create and configure the FastAPI app with an orchestrator."""
     global orchestrator
+    setup_logging()
 
-    schema_extractor = SQLiteSchemaExtractor(db_path)
+    schema_extractor = SQLiteSchemaExtractor(db_url)
     schema = schema_extractor.extract_schema()
 
     llm_client = LLMClient(
@@ -58,7 +61,7 @@ def create_app(
     }
 
     orchestrator = QueryOrchestrator(
-        db_path=db_path,
+        db_url=db_url,
         llm_client=llm_client,
         system_prompt=system_prompt,
         schema=validator_schema,
@@ -68,7 +71,7 @@ def create_app(
     return app
 
 
-@app.post("/query")
+@app.post("/v1/query")
 async def query(request: QueryRequest) -> Dict[str, Any]:
     result = await asyncio.to_thread(orchestrator.process_query, request.question)
     return result
@@ -78,7 +81,7 @@ if __name__ == "__main__":
     import uvicorn
 
     parser = argparse.ArgumentParser(description="Odin API Server")
-    parser.add_argument("--db", required=True, help="Path to SQLite database file")
+    parser.add_argument("--db", required=True, help="Database connection string")
     parser.add_argument("--host", default="0.0.0.0", help="Server host")
     parser.add_argument("--port", type=int, default=8000, help="Server port")
     parser.add_argument("--llm-url", default="http://localhost:1234/v1", help="LLM API base URL")
@@ -89,7 +92,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     create_app(
-        db_path=args.db,
+        db_url=args.db,
         llm_base_url=args.llm_url,
         llm_api_key=args.llm_key,
         llm_model=args.llm_model,
@@ -97,4 +100,4 @@ if __name__ == "__main__":
         default_limit=args.default_limit,
     )
 
-    uvicorn.run(app, host=args.host, port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port, log_config=get_uvicorn_log_config())
