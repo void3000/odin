@@ -33,3 +33,23 @@ class TestBuildWorkflow:
 
         assert ctx.params is not None
         assert isinstance(ctx.params, list)
+
+    def test_applies_default_limit_when_none(self):
+        workflow = BuildWorkflow(default_limit=100)
+        ctx = _make_context()
+        assert ctx.query_ir.limit is None
+        workflow.run(ctx)
+        assert ctx.query_ir.limit == 100
+
+    def test_does_not_override_existing_limit(self):
+        workflow = BuildWorkflow(default_limit=100)
+        ctx = _make_context()
+        ctx.query_ir.limit = 10
+        workflow.run(ctx)
+        assert ctx.query_ir.limit == 10
+
+    def test_custom_default_limit(self):
+        workflow = BuildWorkflow(default_limit=50)
+        ctx = _make_context()
+        workflow.run(ctx)
+        assert ctx.query_ir.limit == 50

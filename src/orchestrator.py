@@ -42,6 +42,7 @@ class QueryOrchestrator:
         llm_client: Any,
         system_prompt: str,
         schema: Dict[str, Any],
+        default_limit: int = 100,
     ):
         self.db_path = db_path
         self.schema = schema
@@ -52,7 +53,7 @@ class QueryOrchestrator:
         self.steps: List[Workflow] = [
             ParseWorkflow(parser),
             ValidateWorkflow(),
-            BuildWorkflow(),
+            BuildWorkflow(default_limit=default_limit),
             ExecuteWorkflow(db_path),
             SummarizeWorkflow(summarizer),
         ]
