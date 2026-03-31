@@ -77,7 +77,7 @@ def main():
     llm_client = LLMClient(
         base_url="http://localhost:1234/v1",
         api_key="lmstudio",
-        model="nvidia/nemotron-3-nano-4b",
+        model="qwen3.5-27b-claude-4.6-opus-reasoning-distilled",
         temperature=0.1,
     )
     logger.info("LM Studio ready (http://localhost:1234)")
