@@ -42,6 +42,7 @@ class QueryOrchestrator:
         system_prompt: str,
         schema: Dict[str, Any],
         default_limit: int = 100,
+        search_path: list[str] | None = None,
     ):
         self.db_url = db_url
         self.schema = schema
@@ -53,7 +54,7 @@ class QueryOrchestrator:
             ParseWorkflow(parser),
             ValidateWorkflow(),
             BuildWorkflow(default_limit=default_limit),
-            ExecuteWorkflow(db_url),
+            ExecuteWorkflow(db_url, search_path=search_path),
             SummarizeWorkflow(summarizer),
         ]
 

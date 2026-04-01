@@ -47,9 +47,9 @@ os.environ.setdefault("ODIN_LOG_LEVEL", "INFO")
 
 import json
 
+from src.db import create_schema_extractor
 from src.llm_client import LLMClient
 from src.llm.nl_to_ir import NaturalLanguageToIR
-from src.schema.extractor import SQLiteSchemaExtractor
 from src.orchestrator import QueryOrchestrator
 
 
@@ -68,7 +68,7 @@ def main():
     # Extract database schema
     logger.info(f"Connecting to: {db_url}")
     logger.info("Extracting database schema...")
-    schema_extractor = SQLiteSchemaExtractor(db_url)
+    schema_extractor = create_schema_extractor(db_url)
     schema = schema_extractor.extract_schema()
     logger.info(f"Found {len(schema.tables)} tables")
 

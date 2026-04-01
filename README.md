@@ -16,10 +16,13 @@ Natural language to SQL conversion pipeline using local LLMs (LM Studio) with su
 ### 1. Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+pip install -e .
+
+# For PostgreSQL support:
+pip install -e ".[postgresql]"
 ```
 
-### 2. Setup LM Studio (Optional for NL queries)
+### 2. Setup LM Studio
 
 1. Download [LM Studio](https://lmstudio.ai/)
 2. Load a model (recommended: 7B-14B parameter instruction-tuned models)
@@ -27,16 +30,41 @@ pip install -r requirements.txt
 
 See [LM Studio Integration Guide](docs/LM_STUDIO_INTEGRATION.md) for details.
 
-### 3. Run the Demo
+### 3. Start the API Server
 
 ```bash
-python main.py
+ODIN_LOG_LEVEL=INFO python -m src.server \
+  --db postgresql://postgres:password@localhost:5432/postgres \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --llm-model qwen3.5-27b-claude-4.6-opus-reasoning-distilled \
+  --temperature 0.1 \
+  --default-limit 50
 ```
 
-This will:
-- Extract schema from Chinook SQLite database
-- Run natural language query examples (if LM Studio available)
-- Run programmatic query examples (JOINs, filters, etc.)
+Supported database URLs:
+
+```
+--db postgresql://user:pass@host:port/dbname
+--db sqlite:///path/to/file.db
+--db /path/to/file.db
+```
+
+### 4. Query the API
+
+```bash
+curl -X POST http://localhost:8000/v1/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Show me all artists"}'
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+|---|---|---|
+| `ODIN_LOG_LEVEL` | Log level: `DEBUG` > `INFO` > `WARNING` > `ERROR` (each level includes all levels below it) | `INFO` |
+| `ODIN_LOG_FORMAT` | Custom Python log format string | built-in |
+| `ODIN_LOG_FILE` | Path to log file (logs also write to file if set) | none |
 
 ## Architecture
 

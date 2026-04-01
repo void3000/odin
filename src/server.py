@@ -16,9 +16,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from src.db import create_schema_extractor
 from src.llm_client import LLMClient
 from src.llm.nl_to_ir import NaturalLanguageToIR
-from src.schema.extractor import SQLiteSchemaExtractor
 from src.orchestrator import QueryOrchestrator
 from src.logging_config import get_component_logger, get_uvicorn_log_config, request_id_var
 
@@ -66,8 +66,9 @@ def create_app(
     """Create and configure the FastAPI app with an orchestrator."""
     global orchestrator
 
-    schema_extractor = SQLiteSchemaExtractor(db_url)
+    schema_extractor = create_schema_extractor(db_url)
     schema = schema_extractor.extract_schema()
+    search_path = getattr(schema_extractor, "schemas", None)
 
     llm_client = LLMClient(
         base_url=llm_base_url,
@@ -92,6 +93,7 @@ def create_app(
         system_prompt=system_prompt,
         schema=validator_schema,
         default_limit=default_limit,
+        search_path=search_path,
     )
 
     return app

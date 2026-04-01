@@ -107,3 +107,129 @@ class SQLiteSchemaExtractor:
             return "datetime"
 
         return "str"
+
+
+class PostgreSQLSchemaExtractor:
+    """Extract schema from PostgreSQL databases.
+
+    Discovers all user-created schemas (excludes pg_* and information_schema).
+    """
+
+    def __init__(self, connection_string: str):
+        self.connection_string = connection_string
+        self.schemas: List[str] = []
+
+    def extract_schema(self) -> DatabaseSchema:
+        import psycopg2
+
+        conn = psycopg2.connect(self.connection_string)
+        try:
+            schemas = self._get_schemas(conn)
+            self.schemas = schemas
+            tables = self._get_tables(conn, schemas)
+            table_defs = []
+
+            for schema_name, table_name in tables:
+                columns = self._get_columns(conn, schema_name, table_name)
+                foreign_keys = self._get_foreign_keys(conn, schema_name, table_name)
+
+                column_defs = []
+                for col_name, col_type, is_nullable, is_pk in columns:
+                    ir_type = self._map_type(col_type)
+                    fk_ref = foreign_keys.get(col_name)
+
+                    column_defs.append(ColumnDef(
+                        name=col_name,
+                        type=ir_type,
+                        nullable=is_nullable,
+                        primary_key=is_pk,
+                        foreign_key=fk_ref,
+                    ))
+
+                table_defs.append(TableDef(name=table_name, columns=column_defs))
+
+            return DatabaseSchema(tables=table_defs)
+        finally:
+            conn.close()
+
+    def _get_schemas(self, conn) -> List[str]:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT schema_name FROM information_schema.schemata "
+            "WHERE schema_name NOT LIKE 'pg_%%' "
+            "AND schema_name != 'information_schema'"
+        )
+        schemas = [row[0] for row in cursor.fetchall()]
+        cursor.close()
+        return schemas
+
+    def _get_tables(self, conn, schemas: List[str]) -> List[Tuple[str, str]]:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT table_schema, table_name FROM information_schema.tables "
+            "WHERE table_schema = ANY(%s) AND table_type = 'BASE TABLE'",
+            (schemas,)
+        )
+        tables = [(row[0], row[1]) for row in cursor.fetchall()]
+        cursor.close()
+        return tables
+
+    def _get_columns(self, conn, schema_name: str, table_name: str) -> List[Tuple]:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT c.column_name, c.data_type, "
+            "  c.is_nullable = 'YES', "
+            "  EXISTS("
+            "    SELECT 1 FROM information_schema.key_column_usage k "
+            "    JOIN information_schema.table_constraints t "
+            "      ON k.constraint_name = t.constraint_name "
+            "      AND k.table_schema = t.table_schema "
+            "    WHERE t.constraint_type = 'PRIMARY KEY' "
+            "      AND k.table_name = c.table_name "
+            "      AND k.column_name = c.column_name "
+            "      AND k.table_schema = c.table_schema"
+            "  ) "
+            "FROM information_schema.columns c "
+            "WHERE c.table_schema = %s AND c.table_name = %s "
+            "ORDER BY c.ordinal_position",
+            (schema_name, table_name)
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+
+    def _get_foreign_keys(self, conn, schema_name: str, table_name: str) -> Dict[str, str]:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT kcu.column_name, ccu.table_name, ccu.column_name "
+            "FROM information_schema.key_column_usage kcu "
+            "JOIN information_schema.referential_constraints rc "
+            "  ON kcu.constraint_name = rc.constraint_name "
+            "  AND kcu.constraint_schema = rc.constraint_schema "
+            "JOIN information_schema.constraint_column_usage ccu "
+            "  ON rc.unique_constraint_name = ccu.constraint_name "
+            "  AND rc.unique_constraint_schema = ccu.constraint_schema "
+            "WHERE kcu.table_schema = %s AND kcu.table_name = %s",
+            (schema_name, table_name)
+        )
+        fk_map = {}
+        for from_col, to_table, to_col in cursor.fetchall():
+            fk_map[from_col] = f"{to_table}.{to_col}"
+        cursor.close()
+        return fk_map
+
+    def _map_type(self, pg_type: str) -> str:
+        pg_type = pg_type.lower()
+
+        if pg_type in ("integer", "bigint", "smallint", "serial", "bigserial"):
+            return "int"
+        if pg_type in ("real", "double precision", "numeric", "decimal", "money"):
+            return "float"
+        if pg_type == "boolean":
+            return "bool"
+        if pg_type == "date":
+            return "date"
+        if pg_type in ("timestamp without time zone", "timestamp with time zone"):
+            return "datetime"
+
+        return "str"

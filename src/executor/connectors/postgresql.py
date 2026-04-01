@@ -34,7 +34,8 @@ class PostgreSQLConnector:
         port: int = 5432,
         database: Optional[str] = None,
         user: Optional[str] = None,
-        password: Optional[str] = None
+        password: Optional[str] = None,
+        search_path: Optional[List[str]] = None,
     ):
         """Initialize PostgreSQL connector.
 
@@ -65,6 +66,7 @@ class PostgreSQLConnector:
                 "Must provide either connection_string or host/database"
             )
 
+        self.search_path = search_path
         self.conn = None
         self.cursor = None
         self._in_transaction = False
@@ -79,6 +81,10 @@ class PostgreSQLConnector:
             import psycopg2
             self.conn = psycopg2.connect(self.connection_string)
             self.cursor = self.conn.cursor()
+            if self.search_path:
+                schemas = ", ".join(self.search_path)
+                self.cursor.execute(f"SET search_path TO {schemas}")
+                self.conn.commit()
         except ImportError:
             raise DBConnectionError(
                 "psycopg2 not installed. Install with: pip install psycopg2-binary"
