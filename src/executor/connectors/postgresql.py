@@ -158,6 +158,9 @@ class PostgreSQLConnector:
             if params is None:
                 params = []
 
+        # Convert ?-style placeholders to PostgreSQL $1, $2, ...
+        sql = self._convert_placeholders(sql)
+
         try:
             # Execute query
             self.cursor.execute(sql, params)
@@ -312,3 +315,8 @@ class PostgreSQLConnector:
                 pass
 
         return metadata
+
+    @staticmethod
+    def _convert_placeholders(sql: str) -> str:
+        """Convert ?-style placeholders to psycopg2 %s style."""
+        return sql.replace("?", "%s")
