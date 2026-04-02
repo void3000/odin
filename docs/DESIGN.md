@@ -7,25 +7,61 @@ Odin is a safe, structured pipeline for converting natural language queries into
 ## Architecture
 
 ```
-User Question (natural language)
-        ↓
-      LLM
-        ↓
-  Predictable IR        ← LLM only outputs this
-        ↓
-   SQLBuilder           ← deterministic translator
-        ↓
-     SQL Query          ← safe, validated, DB-specific
-        ↓
-    Database
+                    ┌─────────────────────────┐
+                    │     REST API Layer       │
+                    │  POST /v1/query          │
+                    │  POST /v1/sessions       │
+                    │  DELETE /v1/sessions/{id} │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │   Session Manager        │
+                    │  (in-memory, TTL-based)  │
+                    │  Conversation history    │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │   Query Orchestrator     │
+                    │  Runs pipeline stages    │
+                    └────────────┬────────────┘
+                                 │
+           ┌─────────────────────┼─────────────────────┐
+           │                     │                     │
+  ┌────────▼────────┐  ┌────────▼────────┐  ┌────────▼────────┐
+  │   Parse (LLM)   │  │    Validate     │  │   Build (SQL)   │
+  │  NL → IR        │  │  IR → Schema    │  │  IR → SQL       │
+  │  + conversation │  │  check          │  │  deterministic  │
+  │    history      │  │                 │  │                 │
+  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘
+           │                     │                     │
+           └─────────────────────┼─────────────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │   Execute (Database)     │
+                    │  SQLite / PostgreSQL     │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │   Summarize (LLM)       │
+                    │  Results → NL summary   │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │   JSON Response          │
+                    │  { summary, success }    │
+                    └─────────────────────────┘
 ```
 
 ### Components
 
-1. **LLM Layer**: Converts natural language to structured Intermediate Representation (IR)
-2. **IR Validator**: Validates the IR structure and semantics
-3. **SQLBuilder**: Deterministically translates IR to SQL
-4. **Database Executor**: Executes the generated SQL safely
+1. **REST API Layer**: FastAPI server exposing query and session endpoints
+2. **Session Manager**: In-memory session store with TTL-based expiry; tracks conversation history (question + summary pairs) for multi-turn follow-ups
+3. **Query Orchestrator**: Runs the pipeline stages sequentially, managing `PipelineContext`
+4. **Parse (LLM)**: Converts natural language to structured IR; includes conversation history when a session is active
+5. **Validate**: Validates IR structure and semantics against the database schema
+6. **Build (SQL)**: Deterministically translates validated IR to parameterized SQL
+7. **Execute (Database)**: Runs the generated SQL against SQLite or PostgreSQL
+8. **Summarize (LLM)**: Converts query results into a natural language summary
 
 ## Key Benefits
 
@@ -486,13 +522,17 @@ f"LIMIT {limit}"
 
 ## Future Enhancements
 
-### Phase 1 (Current)
+### Phase 1 (Complete)
 - [x] SELECT queries with WHERE, JOIN, ORDER BY, LIMIT
-- [ ] IR validation
-- [ ] SQLBuilder implementation
-- [ ] LLM integration
+- [x] IR validation
+- [x] SQLBuilder implementation
+- [x] LLM integration (OpenAI-compatible API)
+- [x] REST API (FastAPI)
+- [x] Result summarization (LLM)
+- [x] SQLite and PostgreSQL support
 
-### Phase 2
+### Phase 2 (In Progress)
+- [ ] Multi-turn conversation sessions (TTL-based, in-memory)
 - [ ] Aggregate functions (COUNT, SUM, AVG, MIN, MAX)
 - [ ] GROUP BY and HAVING clauses
 - [ ] Subqueries
@@ -505,9 +545,10 @@ f"LIMIT {limit}"
 - [ ] Transaction support
 
 ### Phase 4
-- [ ] Multiple database dialect support (PostgreSQL, MySQL, SQLite)
+- [ ] Additional database dialects (MySQL)
 - [ ] Query optimization hints
 - [ ] Query caching
+- [ ] Persistent session storage
 - [ ] Execution plan analysis
 
 ## Security Considerations
