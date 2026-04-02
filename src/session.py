@@ -75,18 +75,19 @@ class SessionManager:
 
     def add_turn(self, session_id: str, question: str, summary: str) -> None:
         """Append a conversation turn to a session."""
-        session = self._sessions.get(session_id)
+        session = self.get(session_id)
         if session is None:
+            logger.warning(f"add_turn called on unknown/expired session: {session_id}")
             return
         session.turns.append(ConversationTurn(question=question, summary=summary))
 
     def get_history(self, session_id: str) -> List[ConversationTurn]:
         """Get the last N turns for a session (bounded by max_turns)."""
-        session = self._sessions.get(session_id)
+        session = self.get(session_id)
         if session is None:
             return []
         return session.turns[-self._max_turns:]
 
     def _is_expired(self, session: Session) -> bool:
         elapsed = (datetime.now(timezone.utc) - session.last_accessed).total_seconds()
-        return elapsed > self._ttl_seconds
+        return elapsed >= self._ttl_seconds
