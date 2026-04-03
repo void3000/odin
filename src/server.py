@@ -11,10 +11,12 @@ import logging
 import time
 import uuid
 import uvicorn
-from typing import Optional
+from typing import Optional, Set
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from langchain_core.messages import HumanMessage
+from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -23,7 +25,6 @@ from src.db import create_schema_extractor
 from src.llm_client import LLMClient
 from src.llm.nl_to_ir import NaturalLanguageToIR
 from src.orchestrator import QueryOrchestrator
-from src.session import SessionManager
 from src.graph import create_graph
 from src.logging_config import get_component_logger, get_uvicorn_log_config, request_id_var, setup_logging
 
@@ -50,7 +51,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 
 
 orchestrator: Optional[QueryOrchestrator] = None
-session_manager: Optional[SessionManager] = None
+sessions: Set[str] = set()
 graph = None
 
 
@@ -60,12 +61,10 @@ class QueryRequest(BaseModel):
 
 
 class SessionMiddleware(BaseHTTPMiddleware):
-    """Handles session lifecycle as before/after hooks on /v1/query.
+    """Handles session validation and response enrichment on /v1/query.
 
-    Before: reads session_id from request body, resolves conversation
-    history, and injects it into request.state.
-    After: appends the turn to session history and injects session_id
-    into the response body.
+    Before: validates session_id exists in sessions set.
+    After: injects session_id into the response body and sets status code.
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -81,18 +80,14 @@ class SessionMiddleware(BaseHTTPMiddleware):
 
         session_id = body.get("session_id")
 
-        # Before: resolve session and inject history into request state
-        request.state.conversation_history = None
-        request.state.session_id = session_id
+        # Validate session exists
+        if session_id and session_id not in sessions:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Session not found or expired"},
+            )
 
-        if session_id:
-            session = session_manager.get(session_id)
-            if session is None:
-                return JSONResponse(
-                    status_code=404,
-                    content={"error": "Session not found or expired"},
-                )
-            request.state.conversation_history = session_manager.get_history(session_id)
+        request.state.session_id = session_id
 
         response = await call_next(request)
 
@@ -110,12 +105,8 @@ class SessionMiddleware(BaseHTTPMiddleware):
             return Response(content=response_body, status_code=response.status_code,
                             headers=dict(response.headers), media_type=response.media_type)
 
-        # After: session post-processing
+        # Inject session_id into response if provided
         if session_id:
-            input_text = body.get("input", "")
-            if result.get("success"):
-                summary = result.get("summary") or result.get("message", "")
-                session_manager.add_turn(session_id, question=input_text, summary=summary)
             result["session_id"] = session_id
 
         # Set status code based on result (only for graph responses, not validation errors)
@@ -144,7 +135,7 @@ def create_app(
     Accepts individual parameters for backwards compatibility.
     Prefer create_app_from_settings() for new code.
     """
-    global orchestrator, session_manager, graph
+    global orchestrator, sessions, graph
 
     schema_extractor = create_schema_extractor(db_url)
     schema = schema_extractor.extract_schema()
@@ -176,12 +167,14 @@ def create_app(
         search_path=search_path,
     )
 
-    session_manager = SessionManager()
+    sessions = set()
 
+    checkpointer = InMemorySaver()
     graph = create_graph(
         orchestrator=orchestrator,
         llm_client=llm_client,
         system_prompt=system_prompt,
+        checkpointer=checkpointer,
     )
 
     return app
@@ -201,26 +194,32 @@ def create_app_from_settings(settings) -> FastAPI:
 
 @app.post("/v1/sessions", status_code=201)
 async def create_session():
-    session = session_manager.create()
-    return {"session_id": session.session_id}
+    session_id = str(uuid.uuid4())
+    sessions.add(session_id)
+    return {"session_id": session_id}
 
 
 @app.delete("/v1/sessions/{session_id}", status_code=204)
 async def delete_session(session_id: str):
-    if not session_manager.delete(session_id):
+    if session_id not in sessions:
         return JSONResponse(
             status_code=404,
             content={"error": "Session not found or expired"},
         )
+    sessions.discard(session_id)
 
 
 @app.post("/v1/query")
 async def query(request: Request, body: QueryRequest):
-    conversation_history = getattr(request.state, "conversation_history", None)
+    session_id = getattr(request.state, "session_id", None)
+    config = None
+    if session_id:
+        config = {"configurable": {"thread_id": session_id}}
 
     graph_result = await asyncio.to_thread(
         graph.invoke,
-        {"input": body.input, "conversation_history": conversation_history},
+        {"messages": [HumanMessage(content=body.input)]},
+        config,
     )
 
     return graph_result["result"]

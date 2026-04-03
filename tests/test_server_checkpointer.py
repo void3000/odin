@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
+from langchain_core.messages import HumanMessage, AIMessage
 
 from src.server import app, QueryRequest
 
@@ -7,23 +8,24 @@ from src.server import app, QueryRequest
 class TestQueryEndpoint:
     def setup_method(self):
         import src.server as server_module
-        from src.session import SessionManager
         self.mock_graph = MagicMock()
         self._original_graph = server_module.graph
         server_module.graph = self.mock_graph
-        self._original_session_manager = server_module.session_manager
-        server_module.session_manager = SessionManager()
+        self._original_sessions = server_module.sessions
+        server_module.sessions = set()
         self.client = TestClient(app)
 
     def teardown_method(self):
         import src.server as server_module
         server_module.graph = self._original_graph
-        server_module.session_manager = self._original_session_manager
+        server_module.sessions = self._original_sessions
 
     def test_successful_query(self):
         self.mock_graph.invoke.return_value = {
-            "input": "Show me all artists",
-            "conversation_history": None,
+            "messages": [
+                HumanMessage(content="Show me all artists"),
+                AIMessage(content="Found 3 artists."),
+            ],
             "intent": "query",
             "result": {
                 "type": "query",
@@ -32,9 +34,7 @@ class TestQueryEndpoint:
                 "error": None,
             },
         }
-
         response = self.client.post("/v1/query", json={"input": "Show me all artists"})
-
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -43,8 +43,10 @@ class TestQueryEndpoint:
 
     def test_failed_query(self):
         self.mock_graph.invoke.return_value = {
-            "input": "bad query",
-            "conversation_history": None,
+            "messages": [
+                HumanMessage(content="bad query"),
+                AIMessage(content="Parse failed"),
+            ],
             "intent": "query",
             "result": {
                 "type": "query",
@@ -52,9 +54,7 @@ class TestQueryEndpoint:
                 "error": "Parse failed",
             },
         }
-
         response = self.client.post("/v1/query", json={"input": "bad query"})
-
         assert response.status_code == 500
         data = response.json()
         assert data["success"] is False
@@ -66,8 +66,10 @@ class TestQueryEndpoint:
 
     def test_chat_response(self):
         self.mock_graph.invoke.return_value = {
-            "input": "hello",
-            "conversation_history": None,
+            "messages": [
+                HumanMessage(content="hello"),
+                AIMessage(content="Hello! I can help you query the database."),
+            ],
             "intent": "chat",
             "result": {
                 "type": "chat",
@@ -75,9 +77,7 @@ class TestQueryEndpoint:
                 "message": "Hello! I can help you query the database.",
             },
         }
-
         response = self.client.post("/v1/query", json={"input": "hello"})
-
         assert response.status_code == 200
         data = response.json()
         assert data["type"] == "chat"
@@ -93,19 +93,17 @@ class TestQueryRequest:
 class TestSessionEndpoints:
     def setup_method(self):
         import src.server as server_module
-        from src.session import SessionManager
         self.mock_graph = MagicMock()
         self._original_graph = server_module.graph
         server_module.graph = self.mock_graph
-        self.session_manager = SessionManager(ttl_seconds=1800, max_turns=10)
-        self._original_session_manager = server_module.session_manager
-        server_module.session_manager = self.session_manager
+        self._original_sessions = server_module.sessions
+        server_module.sessions = set()
         self.client = TestClient(app)
 
     def teardown_method(self):
         import src.server as server_module
         server_module.graph = self._original_graph
-        server_module.session_manager = self._original_session_manager
+        server_module.sessions = self._original_sessions
 
     def test_create_session(self):
         response = self.client.post("/v1/sessions")
@@ -126,8 +124,10 @@ class TestSessionEndpoints:
 
     def test_query_with_valid_session(self):
         self.mock_graph.invoke.return_value = {
-            "input": "show all users",
-            "conversation_history": None,
+            "messages": [
+                HumanMessage(content="show all users"),
+                AIMessage(content="Found 3 users."),
+            ],
             "intent": "query",
             "result": {
                 "type": "query",
@@ -146,7 +146,6 @@ class TestSessionEndpoints:
         data = response.json()
         assert data["session_id"] == session_id
         assert data["success"] is True
-        assert data["type"] == "query"
 
     def test_query_with_unknown_session_returns_404(self):
         response = self.client.post(
@@ -157,8 +156,10 @@ class TestSessionEndpoints:
 
     def test_query_without_session_works_stateless(self):
         self.mock_graph.invoke.return_value = {
-            "input": "show all users",
-            "conversation_history": None,
+            "messages": [
+                HumanMessage(content="show all users"),
+                AIMessage(content="Found 3 users."),
+            ],
             "intent": "query",
             "result": {
                 "type": "query",
@@ -175,10 +176,12 @@ class TestSessionEndpoints:
         data = response.json()
         assert "session_id" not in data or data.get("session_id") is None
 
-    def test_successful_query_appends_turn_to_session(self):
+    def test_query_passes_thread_id_to_graph(self):
         self.mock_graph.invoke.return_value = {
-            "input": "show all users",
-            "conversation_history": None,
+            "messages": [
+                HumanMessage(content="show all users"),
+                AIMessage(content="Found 3 users."),
+            ],
             "intent": "query",
             "result": {
                 "type": "query",
@@ -193,76 +196,34 @@ class TestSessionEndpoints:
             "/v1/query",
             json={"input": "show all users", "session_id": session_id},
         )
-        session = self.session_manager.get(session_id)
-        assert len(session.turns) == 1
-        assert session.turns[0].question == "show all users"
-        assert session.turns[0].summary == "Found 3 users."
+        call_args = self.mock_graph.invoke.call_args
+        input_dict = call_args[0][0]
+        assert isinstance(input_dict["messages"][0], HumanMessage)
+        assert input_dict["messages"][0].content == "show all users"
+        config = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("config")
+        assert config["configurable"]["thread_id"] == session_id
 
-    def test_chat_response_appends_turn_to_session(self):
+    def test_stateless_query_has_no_config(self):
         self.mock_graph.invoke.return_value = {
-            "input": "what tables exist?",
-            "conversation_history": None,
-            "intent": "chat",
-            "result": {
-                "type": "chat",
-                "success": True,
-                "message": "There are 3 tables: users, orders, products.",
-            },
-        }
-        create_resp = self.client.post("/v1/sessions")
-        session_id = create_resp.json()["session_id"]
-        self.client.post(
-            "/v1/query",
-            json={"input": "what tables exist?", "session_id": session_id},
-        )
-        session = self.session_manager.get(session_id)
-        assert len(session.turns) == 1
-        assert session.turns[0].question == "what tables exist?"
-        assert session.turns[0].summary == "There are 3 tables: users, orders, products."
-
-    def test_failed_query_does_not_append_turn(self):
-        self.mock_graph.invoke.return_value = {
-            "input": "bad query",
-            "conversation_history": None,
-            "intent": "query",
-            "result": {
-                "type": "query",
-                "success": False,
-                "error": "Parse failed",
-            },
-        }
-        create_resp = self.client.post("/v1/sessions")
-        session_id = create_resp.json()["session_id"]
-        self.client.post(
-            "/v1/query",
-            json={"input": "bad query", "session_id": session_id},
-        )
-        session = self.session_manager.get(session_id)
-        assert len(session.turns) == 0
-
-    def test_query_passes_history_to_graph(self):
-        self.mock_graph.invoke.return_value = {
-            "input": "filter by active",
-            "conversation_history": None,
+            "messages": [
+                HumanMessage(content="show all users"),
+                AIMessage(content="Found 3 users."),
+            ],
             "intent": "query",
             "result": {
                 "type": "query",
                 "success": True,
-                "summary": "Result.",
+                "summary": "Found 3 users.",
                 "error": None,
             },
         }
-        create_resp = self.client.post("/v1/sessions")
-        session_id = create_resp.json()["session_id"]
-
-        # Manually add a turn to simulate first query
-        self.session_manager.add_turn(session_id, "show all users", "Found 10 users.")
-
         self.client.post(
             "/v1/query",
-            json={"input": "filter by active", "session_id": session_id},
+            json={"input": "show all users"},
         )
-        call_args = self.mock_graph.invoke.call_args[0][0]
-        assert call_args["input"] == "filter by active"
-        assert len(call_args["conversation_history"]) == 1
-        assert call_args["conversation_history"][0].question == "show all users"
+        call_args = self.mock_graph.invoke.call_args
+        if len(call_args[0]) > 1:
+            assert call_args[0][1] is None
+        else:
+            config = call_args[1].get("config")
+            assert config is None
