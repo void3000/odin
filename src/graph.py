@@ -18,18 +18,25 @@ ROUTER_SYSTEM_PROMPT = """You are a request classifier. Your job is to determine
 is a database query that needs SQL execution, or a conversational message.
 
 Respond with exactly one word:
-- "query" if the user wants to retrieve, filter, count, or analyze data from the database
-- "chat" if the user is asking a general question, greeting, requesting clarification, \
-or asking about the database schema/structure
+- "query" if the user wants to retrieve, filter, count, or analyze specific data stored in the database
+- "chat" if the user is asking a general knowledge question, greeting, requesting clarification, \
+asking about the database schema/structure, or asking about concepts/definitions
+
+Key distinction: "query" means the answer requires running SQL against the database. \
+"chat" means the answer can be given from general knowledge or schema information alone.
 
 Examples:
 - "show me all users" -> query
 - "how many orders last month" -> query
 - "filter by active ones" -> query
+- "what is the total revenue" -> query
 - "hello" -> chat
 - "what tables are available?" -> chat
 - "thanks" -> chat
-- "what does the status field mean?" -> chat"""
+- "what does the status field mean?" -> chat
+- "what is rock music?" -> chat
+- "explain what a genre is" -> chat
+- "what columns does the users table have?" -> chat"""
 
 CHAT_SYSTEM_PROMPT_TEMPLATE = """You are a helpful data assistant. You can answer questions about the database \
 schema, explain what data is available, and have general conversations.
