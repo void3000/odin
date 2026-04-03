@@ -321,6 +321,52 @@ class TestQueryIR:
                 fields=[]
             )
 
+class TestFieldExprAggregates:
+    def test_field_with_count_star(self):
+        field = FieldExpr(field="*", function="COUNT", alias="total")
+        assert field.function == "COUNT"
+        assert field.field == "*"
+        assert field.alias == "total"
+
+    def test_field_with_sum(self):
+        field = FieldExpr(field="total", function="SUM", table="orders", alias="total_sum")
+        assert field.function == "SUM"
+        assert field.field == "total"
+
+    def test_field_with_avg(self):
+        field = FieldExpr(field="age", function="AVG")
+        assert field.function == "AVG"
+
+    def test_field_with_min(self):
+        field = FieldExpr(field="price", function="MIN")
+        assert field.function == "MIN"
+
+    def test_field_with_max(self):
+        field = FieldExpr(field="price", function="MAX")
+        assert field.function == "MAX"
+
+    def test_field_without_function_defaults_none(self):
+        field = FieldExpr(field="name")
+        assert field.function is None
+
+    def test_invalid_function_rejected(self):
+        import pytest
+        with pytest.raises(Exception):
+            FieldExpr(field="name", function="INVALID")
+
+    def test_count_star_in_query_ir(self):
+        from src.ir.models import QueryIR
+        import json
+        ir_json = json.dumps({
+            "operation": "SELECT",
+            "source": {"table": "users"},
+            "fields": [{"field": "*", "function": "COUNT", "alias": "total"}]
+        })
+        query_ir = QueryIR.model_validate_json(ir_json)
+        assert query_ir.fields[0].function == "COUNT"
+        assert query_ir.fields[0].field == "*"
+
+
     def test_complex_query_from_design_doc(self):
         """Test complex query example from DESIGN.md."""
         query = QueryIR(

@@ -58,6 +58,9 @@ class FieldExpr(BaseModel):
     field: str = Field(..., description="Column name or * for all columns")
     table: str | None = Field(None, description="Table name if field needs qualification")
     alias: str | None = Field(None, description="Alias for the selected column")
+    function: Literal["COUNT", "SUM", "AVG", "MIN", "MAX"] | None = Field(
+        None, description="Aggregate function to apply (COUNT, SUM, AVG, MIN, MAX)"
+    )
 
     @field_validator("field")
     @classmethod
