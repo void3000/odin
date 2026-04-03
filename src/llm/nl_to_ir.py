@@ -182,15 +182,19 @@ Query: "How many artists are there?"
   ]
 }}
 
-IMPORTANT RULES:
+STRICT RULES - VIOLATIONS WILL CAUSE ERRORS:
 1. Always include "operation": "SELECT"
 2. Use table qualifiers (table field) when doing JOINs
 3. For JOIN conditions, use nested dict format: {{"field": "...", "table": "..."}} for both sides
 4. LIKE patterns need % wildcards: "%search%"
 5. Milliseconds are used for duration (60000 = 1 minute)
-6. Only output valid JSON - no explanations or markdown
-7. Match table and column names exactly as shown in schema
-8. The only supported aggregate functions are: COUNT, SUM, AVG, MIN, MAX. Do not use DISTINCT or any other function
+6. Only output valid JSON - no explanations, no markdown, no text before or after the JSON
+7. Match table and column names EXACTLY as shown in schema (case-sensitive)
+8. The ONLY allowed values for "function" are: "COUNT", "SUM", "AVG", "MIN", "MAX"
+   - DISTINCT is NOT supported. Do not use it anywhere.
+   - No other function names are valid. If a query needs an unsupported function, approximate using only the allowed ones.
+9. The ONLY allowed fields in each object are those defined above. Do not invent new fields.
+10. If you cannot represent a query using the IR format above, use the closest possible approximation.
 
 Now convert the user's query to IR JSON:"""
 
