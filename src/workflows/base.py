@@ -20,6 +20,9 @@ class PipelineContext:
     db_url: str
     schema: Dict[str, Any]
 
+    # Conversation history (for multi-turn sessions)
+    conversation_history: Optional[List[Any]] = None
+
     # Stage outputs
     query_ir: Optional[QueryIR] = None
     sql: Optional[str] = None

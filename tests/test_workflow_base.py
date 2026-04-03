@@ -1,22 +1,23 @@
 import pytest
 from src.workflows.base import Workflow, PipelineContext
+from src.session import ConversationTurn
 
 
 class TestPipelineContext:
     def test_create_with_required_fields(self):
         ctx = PipelineContext(
             natural_language="Show me all users",
-            db_path="/tmp/test.db",
+            db_url="sqlite:///test.db",
             schema={"users": {"columns": {"id": {"type": "int"}}}},
         )
         assert ctx.natural_language == "Show me all users"
-        assert ctx.db_path == "/tmp/test.db"
+        assert ctx.db_url == "sqlite:///test.db"
         assert ctx.schema == {"users": {"columns": {"id": {"type": "int"}}}}
 
     def test_optional_fields_default_to_none(self):
         ctx = PipelineContext(
             natural_language="test",
-            db_path="/tmp/test.db",
+            db_url="sqlite:///test.db",
             schema={},
         )
         assert ctx.query_ir is None
@@ -30,10 +31,30 @@ class TestPipelineContext:
     def test_timings_default_to_empty_dict(self):
         ctx = PipelineContext(
             natural_language="test",
-            db_path="/tmp/test.db",
+            db_url="sqlite:///test.db",
             schema={},
         )
         assert ctx.timings == {}
+
+    def test_pipeline_context_has_conversation_history(self):
+        ctx = PipelineContext(
+            natural_language="test",
+            db_url="sqlite:///test.db",
+            schema={},
+            conversation_history=[
+                ConversationTurn(question="q1", summary="s1"),
+            ],
+        )
+        assert len(ctx.conversation_history) == 1
+        assert ctx.conversation_history[0].question == "q1"
+
+    def test_pipeline_context_conversation_history_defaults_none(self):
+        ctx = PipelineContext(
+            natural_language="test",
+            db_url="sqlite:///test.db",
+            schema={},
+        )
+        assert ctx.conversation_history is None
 
 
 class _StubWorkflow(Workflow):
@@ -55,7 +76,7 @@ class TestWorkflow:
     def test_execute_calls_run_and_records_timing(self):
         ctx = PipelineContext(
             natural_language="test",
-            db_path="/tmp/test.db",
+            db_url="sqlite:///test.db",
             schema={},
         )
         workflow = _StubWorkflow()
@@ -68,7 +89,7 @@ class TestWorkflow:
     def test_execute_catches_exception_and_sets_error(self):
         ctx = PipelineContext(
             natural_language="test",
-            db_path="/tmp/test.db",
+            db_url="sqlite:///test.db",
             schema={},
         )
         workflow = _FailingWorkflow()
