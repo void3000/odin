@@ -11,7 +11,10 @@ class ParseWorkflow(Workflow):
         self.parser = parser
 
     def run(self, context: PipelineContext) -> PipelineContext:
-        result = self.parser.parse(context.natural_language)
+        result = self.parser.parse(
+            context.natural_language,
+            conversation_history=context.conversation_history,
+        )
         if not result["success"]:
             context.error = result["error"]
             context.failed_stage = self.name

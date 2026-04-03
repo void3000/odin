@@ -36,21 +36,23 @@ class IRParser:
         self.llm_client = llm_client
         self.system_prompt = system_prompt
     
-    def parse(self, natural_language: str) -> Dict[str, Any]:
+    def parse(self, natural_language: str, conversation_history=None) -> Dict[str, Any]:
         """
         Parse a natural language query into IR.
-        
+
         Args:
             natural_language: User's question in natural language
-            
+            conversation_history: Optional list of ConversationTurn for context
+
         Returns:
             Dict with 'success' boolean and either 'data' (QueryIR) or 'error'
         """
         try:
             # Call LLM to generate IR JSON
+            user_message = self._build_user_message(natural_language, conversation_history)
             success, response = self.llm_client.generate(
                 system_prompt=self.system_prompt,
-                user_message=natural_language
+                user_message=user_message,
             )
             
             if not success:
@@ -91,6 +93,19 @@ class IRParser:
                 "error": error_msg
             }
     
+    def _build_user_message(self, natural_language: str, conversation_history=None) -> str:
+        """Build the user message, optionally including conversation history."""
+        if not conversation_history:
+            return natural_language
+
+        lines = ["Previous conversation:"]
+        for turn in conversation_history:
+            lines.append(f"User: {turn.question}")
+            lines.append(f"Assistant: {turn.summary}")
+            lines.append("")
+        lines.append(f"Current question: {natural_language}")
+        return "\n".join(lines)
+
     def _extract_json(self, content: str) -> str:
         """
         Extract JSON from LLM response (handles markdown code blocks).
