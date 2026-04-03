@@ -14,6 +14,57 @@ from src.ir.models import QueryIR
 from src.schema.schema import DatabaseSchema
 
 
+def _generate_ir_spec() -> str:
+    """Generate a compact IR format specification from the Pydantic models.
+
+    This ensures the LLM prompt always matches the actual IR grammar.
+    """
+    schema = QueryIR.model_json_schema()
+    defs = schema.get("$defs", {})
+
+    def _format_enum(values):
+        return " | ".join(f'"{v}"' for v in values)
+
+    def _format_props(model_name: str) -> str:
+        model_def = defs.get(model_name, {})
+        props = model_def.get("properties", {})
+        required = set(model_def.get("required", []))
+        lines = []
+        for name, info in props.items():
+            req = "(required)" if name in required else "(optional)"
+            desc = info.get("description", "")
+            if "enum" in info:
+                desc += f" Values: {_format_enum(info['enum'])}"
+            elif "anyOf" in info:
+                for option in info["anyOf"]:
+                    if "enum" in option:
+                        desc += f" Values: {_format_enum(option['enum'])}"
+            lines.append(f"    - {name} {req}: {desc}")
+        return "\n".join(lines)
+
+    # Build spec from root QueryIR properties
+    root_props = schema.get("properties", {})
+    root_required = set(schema.get("required", []))
+
+    spec_lines = ["The IR is a JSON object. Only the fields listed below are allowed.\n"]
+
+    # QueryIR top-level
+    spec_lines.append("QueryIR (root object):")
+    for name, info in root_props.items():
+        req = "(required)" if name in root_required else "(optional)"
+        desc = info.get("description", "")
+        spec_lines.append(f"  - {name} {req}: {desc}")
+
+    # Sub-models
+    for model_name in ["TableSource", "FieldExpr", "JoinExpr", "ConditionExpr", "LogicalExpr", "OrderExpr"]:
+        if model_name in defs:
+            model_desc = defs[model_name].get("description", "").split("\n")[0]
+            spec_lines.append(f"\n{model_name}: {model_desc}")
+            spec_lines.append(_format_props(model_name))
+
+    return "\n".join(spec_lines)
+
+
 class NaturalLanguageToIR:
     """Converts natural language queries to IR using LLM."""
 
@@ -81,45 +132,16 @@ class NaturalLanguageToIR:
     def _build_system_prompt(self, schema: DatabaseSchema) -> str:
         """Build the system prompt with schema context and IR format."""
         schema_text = self._format_schema(schema)
+        ir_spec = _generate_ir_spec()
 
         return f"""You are a SQL query translator. Convert natural language queries into a structured JSON format called IR (Intermediate Representation).
 
 DATABASE SCHEMA:
 {schema_text}
 
-IR FORMAT SPECIFICATION:
+IR FORMAT SPECIFICATION (auto-generated from schema — this is the ONLY valid format):
 
-The IR is a JSON object with these fields:
-
-1. "operation": Always "SELECT" (only SELECT queries supported)
-
-2. "source": The main table to query
-   {{"table": "table_name"}}
-
-3. "fields": List of columns to retrieve
-   [{{"field": "column_name", "table": "table_name", "alias": "optional_alias", "function": "optional_aggregate"}}]
-   - Use "table" when joining multiple tables
-   - Use "alias" to rename output columns
-   - Use "function" for aggregates: "COUNT", "SUM", "AVG", "MIN", "MAX"
-   - COUNT can use "*" as the field (e.g., {{"field": "*", "function": "COUNT"}})
-   - SUM, AVG, MIN, MAX require a specific column name
-
-4. "joins": Optional list of JOIN operations
-   [{{
-     "type": "INNER" | "LEFT" | "RIGHT",
-     "table": "table_to_join",
-     "on": {{"field": "col1", "table": "table1", "op": "=", "value": {{"field": "col2", "table": "table2"}}}}
-   }}]
-
-5. "filters": Optional WHERE conditions
-   - Simple condition: {{"field": "column", "table": "table", "op": "=", "value": 123}}
-   - Operators: "=", "!=", ">", ">=", "<", "<=", "LIKE", "IN"
-   - Logical AND/OR: {{"logic": "AND", "conditions": [condition1, condition2]}}
-
-6. "order_by": Optional sorting
-   [{{"field": "column", "table": "table", "direction": "ASC" | "DESC"}}]
-
-7. "limit": Optional row limit (integer)
+{ir_spec}
 
 EXAMPLES:
 
