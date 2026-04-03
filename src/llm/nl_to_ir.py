@@ -190,6 +190,7 @@ IMPORTANT RULES:
 5. Milliseconds are used for duration (60000 = 1 minute)
 6. Only output valid JSON - no explanations or markdown
 7. Match table and column names exactly as shown in schema
+8. The only supported aggregate functions are: COUNT, SUM, AVG, MIN, MAX. Do not use DISTINCT or any other function
 
 Now convert the user's query to IR JSON:"""
 
