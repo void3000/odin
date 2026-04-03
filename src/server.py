@@ -21,6 +21,7 @@ from src.llm_client import LLMClient
 from src.llm.nl_to_ir import NaturalLanguageToIR
 from src.orchestrator import QueryOrchestrator
 from src.session import SessionManager
+from src.graph import create_graph
 from src.logging_config import get_component_logger, get_uvicorn_log_config, request_id_var
 
 logger = get_component_logger("server")
@@ -51,10 +52,11 @@ app.add_middleware(RequestIdMiddleware)
 
 orchestrator: Optional[QueryOrchestrator] = None
 session_manager: Optional[SessionManager] = None
+graph = None
 
 
 class QueryRequest(BaseModel):
-    question: str
+    input: str
     session_id: Optional[str] = None
 
 
@@ -67,7 +69,7 @@ def create_app(
     default_limit: int = 100,
 ) -> FastAPI:
     """Create and configure the FastAPI app with an orchestrator."""
-    global orchestrator, session_manager
+    global orchestrator, session_manager, graph
 
     schema_extractor = create_schema_extractor(db_url)
     schema = schema_extractor.extract_schema()
@@ -100,6 +102,13 @@ def create_app(
     )
 
     session_manager = SessionManager()
+
+    graph = create_graph(
+        orchestrator=orchestrator,
+        llm_client=llm_client,
+        system_prompt=system_prompt,
+    )
+
     return app
 
 
@@ -132,17 +141,22 @@ async def query(request: QueryRequest):
             )
         conversation_history = session_manager.get_history(session_id)
 
-    result = await asyncio.to_thread(
-        orchestrator.process_query,
-        request.question,
-        conversation_history=conversation_history,
+    graph_result = await asyncio.to_thread(
+        graph.invoke,
+        {
+            "input": request.input,
+            "conversation_history": conversation_history,
+        },
     )
 
+    result = graph_result["result"]
+
     if session_id and result.get("success"):
+        summary = result.get("summary") or result.get("message", "")
         session_manager.add_turn(
             session_id,
-            question=request.question,
-            summary=result.get("summary", ""),
+            question=request.input,
+            summary=summary,
         )
 
     if session_id:
