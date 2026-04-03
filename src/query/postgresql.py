@@ -140,7 +140,7 @@ class PostgreSQLBuilder(QueryBuilder):
     def visit_field(self, field: FieldExpr) -> str:
         """Visit a field expression.
 
-        Handles regular fields, wildcards, and scalar subqueries.
+        Handles regular fields, wildcards, and aggregate functions.
 
         Args:
             field: Field expression to visit
@@ -148,6 +148,21 @@ class PostgreSQLBuilder(QueryBuilder):
         Returns:
             Field SQL fragment
         """
+        # Aggregate function
+        if getattr(field, "function", None) is not None:
+            if field.field == "*":
+                inner = "*"
+            elif field.table:
+                inner = self._quote_qualified(field.table, field.field)
+            else:
+                inner = self._quote_identifier(field.field)
+
+            result = f"{field.function}({inner})"
+
+            if field.alias:
+                result += f" AS {self._quote_identifier(field.alias)}"
+            return result
+
         # Wildcard
         if field.field == "*":
             if field.table:

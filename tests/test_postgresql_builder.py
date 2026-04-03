@@ -520,4 +520,103 @@ class TestPostgreSQLBuilderEdgeCases:
         builder = PostgreSQLBuilder()
         result = builder.build(query_ir)
 
+
+class TestPostgreSQLAggregates:
+    def test_count_star(self):
+        query_ir = QueryIR(
+            operation="SELECT",
+            source=TableSource(table="users"),
+            fields=[FieldExpr(field="*", function="COUNT", alias="total")],
+        )
+        builder = PostgreSQLBuilder()
+        result = builder.build(query_ir)
+        assert 'SELECT COUNT(*) AS "total"' in result.query["sql"]
+
+    def test_count_star_no_alias(self):
+        query_ir = QueryIR(
+            operation="SELECT",
+            source=TableSource(table="users"),
+            fields=[FieldExpr(field="*", function="COUNT")],
+        )
+        builder = PostgreSQLBuilder()
+        result = builder.build(query_ir)
+        assert "SELECT COUNT(*)" in result.query["sql"]
+        assert "AS" not in result.query["sql"]
+
+    def test_sum_column(self):
+        query_ir = QueryIR(
+            operation="SELECT",
+            source=TableSource(table="orders"),
+            fields=[FieldExpr(field="total", function="SUM", alias="revenue")],
+        )
+        builder = PostgreSQLBuilder()
+        result = builder.build(query_ir)
+        assert 'SELECT SUM("total") AS "revenue"' in result.query["sql"]
+
+    def test_sum_qualified_column(self):
+        query_ir = QueryIR(
+            operation="SELECT",
+            source=TableSource(table="orders"),
+            fields=[FieldExpr(field="total", function="SUM", table="orders")],
+        )
+        builder = PostgreSQLBuilder()
+        result = builder.build(query_ir)
+        assert 'SELECT SUM("orders"."total")' in result.query["sql"]
+
+    def test_avg_column(self):
+        query_ir = QueryIR(
+            operation="SELECT",
+            source=TableSource(table="users"),
+            fields=[FieldExpr(field="age", function="AVG", alias="avg_age")],
+        )
+        builder = PostgreSQLBuilder()
+        result = builder.build(query_ir)
+        assert 'SELECT AVG("age") AS "avg_age"' in result.query["sql"]
+
+    def test_min_column(self):
+        query_ir = QueryIR(
+            operation="SELECT",
+            source=TableSource(table="orders"),
+            fields=[FieldExpr(field="total", function="MIN")],
+        )
+        builder = PostgreSQLBuilder()
+        result = builder.build(query_ir)
+        assert 'SELECT MIN("total")' in result.query["sql"]
+
+    def test_max_column(self):
+        query_ir = QueryIR(
+            operation="SELECT",
+            source=TableSource(table="orders"),
+            fields=[FieldExpr(field="total", function="MAX")],
+        )
+        builder = PostgreSQLBuilder()
+        result = builder.build(query_ir)
+        assert 'SELECT MAX("total")' in result.query["sql"]
+
+    def test_mixed_aggregate_and_plain(self):
+        query_ir = QueryIR(
+            operation="SELECT",
+            source=TableSource(table="users"),
+            fields=[
+                FieldExpr(field="*", function="COUNT", alias="total"),
+                FieldExpr(field="name"),
+            ],
+        )
+        builder = PostgreSQLBuilder()
+        result = builder.build(query_ir)
+        assert 'SELECT COUNT(*) AS "total", "name"' in result.query["sql"]
+
+    def test_aggregate_with_filter(self):
+        query_ir = QueryIR(
+            operation="SELECT",
+            source=TableSource(table="users"),
+            fields=[FieldExpr(field="*", function="COUNT", alias="active_count")],
+            filters=ConditionExpr(field="status", op="=", value="active"),
+        )
+        builder = PostgreSQLBuilder()
+        result = builder.build(query_ir)
+        assert 'COUNT(*) AS "active_count"' in result.query["sql"]
+        assert 'WHERE "status" = $1' in result.query["sql"]
+        assert result.query["params"] == ["active"]
+
         assert "LIMIT" not in result.query['sql']
