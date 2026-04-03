@@ -35,8 +35,6 @@ See [LM Studio Integration Guide](docs/LM_STUDIO_INTEGRATION.md) for details.
 ```bash
 ODIN_LOG_LEVEL=INFO python -m src.server \
   --db postgresql://postgres:password@localhost:5432/postgres \
-  --host 127.0.0.1 \
-  --port 8000 \
   --llm-model qwen3.5-27b-claude-4.6-opus-reasoning-distilled \
   --temperature 0.1 \
   --default-limit 50
@@ -69,49 +67,60 @@ curl -X POST http://localhost:8000/v1/query \
 ## Architecture
 
 ```
-┌─────────────────────┐
-│  Natural Language   │
-│     "Show all       │
-│      artists"       │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│    LM Studio        │
-│   (Local LLM)       │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│   IR (Pydantic)     │  ◄──── Can also construct manually
-│   QueryIR Model     │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│   Query Builder     │
-│  (PostgreSQL/       │
-│   MongoDB/SQLite)   │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│  Query Executor     │
-│  (Bridge Pattern)   │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│  DB Connector       │
-│  (PostgreSQL/       │
-│   MongoDB/SQLite)   │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│     Results         │
-│  (Dict rows)        │
-└─────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  HTTP POST /v1/query                                     │
+│  { "question": "Show all artists" }                      │
+└────────────────────────┬─────────────────────────────────┘
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │  FastAPI Server     │
+              │  RequestId + Session│
+              │  Middleware         │
+              └──────────┬──────────┘
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │  LangGraph Router   │──────────┐
+              │  (intent classify)  │          │
+              └──────────┬──────────┘          │
+                  query  │              chat   │
+                         ▼                     ▼
+              ┌─────────────────────┐  ┌──────────────┐
+              │  Orchestrator       │  │  Chat Node   │
+              │  (5-stage pipeline) │  │  (LLM reply) │
+              └──────────┬──────────┘  └──────────────┘
+                         │
+        ┌────────────────┼────────────────┐
+        ▼                ▼                ▼
+  ┌───────────┐  ┌──────────────┐  ┌───────────┐
+  │ 1. Parse  │  │ 2. Validate  │  │ 3. Build  │
+  │ NL → IR   │  │ IR ↔ Schema  │  │ IR → SQL  │
+  │ (LLM)     │  │              │  │           │
+  └───────────┘  └──────────────┘  └───────────┘
+        │                │                │
+        └────────────────┼────────────────┘
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │ 4. Execute          │
+              │ QueryExecutor       │
+              │ (Bridge Pattern)    │
+              └──────────┬──────────┘
+                         │
+           ┌─────────────┼─────────────┐
+           ▼             ▼             ▼
+     ┌──────────┐ ┌──────────┐ ┌──────────┐
+     │PostgreSQL│ │  SQLite  │ │ MongoDB  │
+     │Connector │ │Connector │ │Connector │
+     └──────────┘ └──────────┘ └──────────┘
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │ 5. Summarize        │
+              │ Results → LLM →    │
+              │ Natural Language    │
+              └─────────────────────┘
 ```
 
 ## Usage Examples
