@@ -7,11 +7,12 @@ The orchestrator runs query processing in a thread to avoid blocking the event l
 
 import asyncio
 import argparse
+import json
 import time
 import uuid
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -46,10 +47,6 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         return response
 
 
-app = FastAPI(title="Odin", description="LLM-to-SQL Pipeline")
-app.add_middleware(RequestIdMiddleware)
-
-
 orchestrator: Optional[QueryOrchestrator] = None
 session_manager: Optional[SessionManager] = None
 graph = None
@@ -60,68 +57,76 @@ class QueryRequest(BaseModel):
     session_id: Optional[str] = None
 
 
-class SessionContext:
-    """Resolved session state for a request.
+class SessionMiddleware(BaseHTTPMiddleware):
+    """Handles session lifecycle as before/after hooks on /v1/query.
 
-    Encapsulates the full session lifecycle: provides conversation
-    history for the graph, and handles turn appending and session_id
-    injection after execution.
+    Before: reads session_id from request body, resolves conversation
+    history, and injects it into request.state.
+    After: appends the turn to session history and injects session_id
+    into the response body.
     """
 
-    def __init__(self, session_id: Optional[str] = None, conversation_history: Optional[list] = None):
-        self.session_id = session_id
-        self.conversation_history = conversation_history
+    async def dispatch(self, request: Request, call_next) -> Response:
+        if request.url.path != "/v1/query" or request.method != "POST":
+            return await call_next(request)
 
-    async def execute(self, input_text: str, graph_instance) -> dict:
-        """Invoke the graph with session context and handle post-processing.
+        # Read and cache the request body (needed for re-reading in endpoint)
+        body_bytes = await request.body()
+        try:
+            body = json.loads(body_bytes)
+        except (json.JSONDecodeError, ValueError):
+            return await call_next(request)
 
-        - Passes conversation history to the graph
-        - Appends successful turns to session history
-        - Injects session_id into the result
-        """
-        graph_result = await asyncio.to_thread(
-            graph_instance.invoke,
-            {"input": input_text, "conversation_history": self.conversation_history},
-        )
-        result = graph_result["result"]
+        session_id = body.get("session_id")
 
-        if self.session_id:
-            if result.get("success"):
-                summary = result.get("summary") or result.get("message", "")
-                session_manager.add_turn(self.session_id, question=input_text, summary=summary)
-            result["session_id"] = self.session_id
+        # Before: resolve session and inject history into request state
+        request.state.conversation_history = None
+        request.state.session_id = session_id
 
-        return result
+        if session_id:
+            session = session_manager.get(session_id)
+            if session is None:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "Session not found or expired"},
+                )
+            request.state.conversation_history = session_manager.get_history(session_id)
+
+        response = await call_next(request)
+
+        # After: no session — pass through unchanged
+        if not session_id:
+            return response
+
+        # Read response body to modify it
+        response_body = b""
+        async for chunk in response.body_iterator:
+            if isinstance(chunk, str):
+                response_body += chunk.encode()
+            else:
+                response_body += chunk
+
+        try:
+            result = json.loads(response_body)
+        except (json.JSONDecodeError, ValueError):
+            return Response(content=response_body, status_code=response.status_code,
+                            headers=dict(response.headers), media_type=response.media_type)
+
+        # Append turn on success
+        input_text = body.get("input", "")
+        if result.get("success"):
+            summary = result.get("summary") or result.get("message", "")
+            session_manager.add_turn(session_id, question=input_text, summary=summary)
+
+        # Inject session_id
+        result["session_id"] = session_id
+
+        return JSONResponse(content=result, status_code=response.status_code)
 
 
-async def get_session_context(request: Request) -> SessionContext:
-    """FastAPI dependency that resolves session state from the request body."""
-    from fastapi import HTTPException
-
-    body = await request.json()
-    session_id = body.get("session_id")
-
-    if not session_id:
-        return SessionContext()
-
-    session = session_manager.get(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found or expired")
-
-    history = session_manager.get_history(session_id)
-    return SessionContext(session_id=session_id, conversation_history=history)
-
-
-async def process_query(request: Request, session: SessionContext = Depends(get_session_context)) -> dict:
-    """FastAPI dependency that orchestrates query execution."""
-    from fastapi import HTTPException
-
-    body = await request.json()
-    input_text = body.get("input")
-    if input_text is None:
-        raise HTTPException(status_code=422, detail="Field 'input' is required")
-
-    return await session.execute(input_text, graph)
+app = FastAPI(title="Odin", description="LLM-to-SQL Pipeline")
+app.add_middleware(SessionMiddleware)
+app.add_middleware(RequestIdMiddleware)
 
 
 def create_app(
@@ -192,7 +197,20 @@ async def delete_session(session_id: str):
 
 
 @app.post("/v1/query")
-async def query(result: dict = Depends(process_query)):
+async def query(request: Request):
+    body = await request.json()
+    input_text = body.get("input")
+    if input_text is None:
+        return JSONResponse(status_code=422, content={"error": "Field 'input' is required"})
+
+    conversation_history = getattr(request.state, "conversation_history", None)
+
+    graph_result = await asyncio.to_thread(
+        graph.invoke,
+        {"input": input_text, "conversation_history": conversation_history},
+    )
+
+    result = graph_result["result"]
     status_code = 200 if result.get("success") else 500
     return JSONResponse(content=result, status_code=status_code)
 
