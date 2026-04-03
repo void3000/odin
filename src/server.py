@@ -61,11 +61,37 @@ class QueryRequest(BaseModel):
 
 
 class SessionContext:
-    """Resolved session state for a request."""
+    """Resolved session state for a request.
+
+    Encapsulates the full session lifecycle: provides conversation
+    history for the graph, and handles turn appending and session_id
+    injection after execution.
+    """
 
     def __init__(self, session_id: Optional[str] = None, conversation_history: Optional[list] = None):
         self.session_id = session_id
         self.conversation_history = conversation_history
+
+    async def execute(self, input_text: str, graph_instance) -> dict:
+        """Invoke the graph with session context and handle post-processing.
+
+        - Passes conversation history to the graph
+        - Appends successful turns to session history
+        - Injects session_id into the result
+        """
+        graph_result = await asyncio.to_thread(
+            graph_instance.invoke,
+            {"input": input_text, "conversation_history": self.conversation_history},
+        )
+        result = graph_result["result"]
+
+        if self.session_id:
+            if result.get("success"):
+                summary = result.get("summary") or result.get("message", "")
+                session_manager.add_turn(self.session_id, question=input_text, summary=summary)
+            result["session_id"] = self.session_id
+
+        return result
 
 
 async def get_session_context(request: Request) -> SessionContext:
@@ -87,11 +113,7 @@ async def get_session_context(request: Request) -> SessionContext:
 
 
 async def process_query(request: Request, session: SessionContext = Depends(get_session_context)) -> dict:
-    """FastAPI dependency that handles the full query lifecycle.
-
-    Uses SessionContext for session state. The endpoint receives
-    only the final result dict.
-    """
+    """FastAPI dependency that orchestrates query execution."""
     from fastapi import HTTPException
 
     body = await request.json()
@@ -99,21 +121,7 @@ async def process_query(request: Request, session: SessionContext = Depends(get_
     if input_text is None:
         raise HTTPException(status_code=422, detail="Field 'input' is required")
 
-    # Invoke graph
-    graph_result = await asyncio.to_thread(
-        graph.invoke,
-        {"input": input_text, "conversation_history": session.conversation_history},
-    )
-    result = graph_result["result"]
-
-    # Post-process session
-    if session.session_id:
-        if result.get("success"):
-            summary = result.get("summary") or result.get("message", "")
-            session_manager.add_turn(session.session_id, question=input_text, summary=summary)
-        result["session_id"] = session.session_id
-
-    return result
+    return await session.execute(input_text, graph)
 
 
 def create_app(
