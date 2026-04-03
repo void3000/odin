@@ -1,16 +1,14 @@
 from unittest.mock import MagicMock
+from langchain_core.messages import HumanMessage, AIMessage
 from src.graph import GraphState, router_node, query_node, chat_node, create_graph
-from src.session import ConversationTurn
 
 
 class TestRouterNode:
     def test_classifies_query_intent(self):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = (True, "query")
-
         state: GraphState = {
-            "input": "show me all users",
-            "conversation_history": None,
+            "messages": [HumanMessage(content="show me all users")],
             "intent": None,
             "result": None,
         }
@@ -20,10 +18,8 @@ class TestRouterNode:
     def test_classifies_chat_intent(self):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = (True, "chat")
-
         state: GraphState = {
-            "input": "hello, what can you do?",
-            "conversation_history": None,
+            "messages": [HumanMessage(content="hello, what can you do?")],
             "intent": None,
             "result": None,
         }
@@ -33,10 +29,8 @@ class TestRouterNode:
     def test_defaults_to_query_on_unexpected_response(self):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = (True, "I think this is a query about users")
-
         state: GraphState = {
-            "input": "show me all users",
-            "conversation_history": None,
+            "messages": [HumanMessage(content="show me all users")],
             "intent": None,
             "result": None,
         }
@@ -46,10 +40,8 @@ class TestRouterNode:
     def test_defaults_to_query_on_llm_failure(self):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = (False, "connection error")
-
         state: GraphState = {
-            "input": "show me all users",
-            "conversation_history": None,
+            "messages": [HumanMessage(content="show me all users")],
             "intent": None,
             "result": None,
         }
@@ -59,17 +51,16 @@ class TestRouterNode:
     def test_includes_conversation_history_in_prompt(self):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = (True, "query")
-
-        history = [ConversationTurn(question="show users", summary="Found 10 users.")]
-
         state: GraphState = {
-            "input": "filter by active",
-            "conversation_history": history,
+            "messages": [
+                HumanMessage(content="show users"),
+                AIMessage(content="Found 10 users."),
+                HumanMessage(content="filter by active"),
+            ],
             "intent": None,
             "result": None,
         }
         router_node(state, mock_llm)
-
         call_args = mock_llm.generate.call_args
         user_message = call_args[1]["user_message"] if "user_message" in call_args[1] else call_args[0][1]
         assert "show users" in user_message
@@ -84,10 +75,8 @@ class TestQueryNode:
             "summary": "Found 3 users.",
             "error": None,
         }
-
         state: GraphState = {
-            "input": "show me all users",
-            "conversation_history": None,
+            "messages": [HumanMessage(content="show me all users")],
             "intent": "query",
             "result": None,
         }
@@ -106,19 +95,55 @@ class TestQueryNode:
             "summary": "42 active users.",
             "error": None,
         }
-
-        history = [ConversationTurn(question="show users", summary="Found 10 users.")]
-
         state: GraphState = {
-            "input": "filter by active",
-            "conversation_history": history,
+            "messages": [
+                HumanMessage(content="show users"),
+                AIMessage(content="Found 10 users."),
+                HumanMessage(content="filter by active"),
+            ],
             "intent": "query",
             "result": None,
         }
         query_node(state, mock_orchestrator)
-        mock_orchestrator.process_query.assert_called_once_with(
-            "filter by active", conversation_history=history,
-        )
+        call_args = mock_orchestrator.process_query.call_args
+        assert call_args[0][0] == "filter by active"
+        history = call_args[1]["conversation_history"]
+        assert len(history) == 1
+        assert history[0].question == "show users"
+        assert history[0].summary == "Found 10 users."
+
+    def test_appends_ai_message_on_success(self):
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.process_query.return_value = {
+            "success": True,
+            "summary": "Found 3 users.",
+            "error": None,
+        }
+        state: GraphState = {
+            "messages": [HumanMessage(content="show me all users")],
+            "intent": "query",
+            "result": None,
+        }
+        result = query_node(state, mock_orchestrator)
+        assert len(result["messages"]) == 1
+        assert isinstance(result["messages"][0], AIMessage)
+        assert result["messages"][0].content == "Found 3 users."
+
+    def test_appends_ai_message_on_failure(self):
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.process_query.return_value = {
+            "success": False,
+            "error": "Parse failed",
+        }
+        state: GraphState = {
+            "messages": [HumanMessage(content="bad query")],
+            "intent": "query",
+            "result": None,
+        }
+        result = query_node(state, mock_orchestrator)
+        assert len(result["messages"]) == 1
+        assert isinstance(result["messages"][0], AIMessage)
+        assert "Parse failed" in result["messages"][0].content
 
     def test_handles_orchestrator_failure(self):
         mock_orchestrator = MagicMock()
@@ -126,10 +151,8 @@ class TestQueryNode:
             "success": False,
             "error": "Parse failed",
         }
-
         state: GraphState = {
-            "input": "bad query",
-            "conversation_history": None,
+            "messages": [HumanMessage(content="bad query")],
             "intent": "query",
             "result": None,
         }
@@ -143,10 +166,8 @@ class TestChatNode:
     def test_generates_chat_response(self):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = (True, "The users table has columns: id, name, email.")
-
         state: GraphState = {
-            "input": "what tables are available?",
-            "conversation_history": None,
+            "messages": [HumanMessage(content="what tables are available?")],
             "intent": "chat",
             "result": None,
         }
@@ -155,13 +176,24 @@ class TestChatNode:
         assert result["result"]["success"] is True
         assert result["result"]["message"] == "The users table has columns: id, name, email."
 
+    def test_appends_ai_message(self):
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = (True, "Hello! How can I help?")
+        state: GraphState = {
+            "messages": [HumanMessage(content="hello")],
+            "intent": "chat",
+            "result": None,
+        }
+        result = chat_node(state, mock_llm, system_prompt="test")
+        assert len(result["messages"]) == 1
+        assert isinstance(result["messages"][0], AIMessage)
+        assert result["messages"][0].content == "Hello! How can I help?"
+
     def test_handles_llm_failure(self):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = (False, "connection error")
-
         state: GraphState = {
-            "input": "hello",
-            "conversation_history": None,
+            "messages": [HumanMessage(content="hello")],
             "intent": "chat",
             "result": None,
         }
@@ -173,17 +205,16 @@ class TestChatNode:
     def test_includes_conversation_history(self):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = (True, "Sure, the active ones are...")
-
-        history = [ConversationTurn(question="show users", summary="Found 10 users.")]
-
         state: GraphState = {
-            "input": "which ones are active?",
-            "conversation_history": history,
+            "messages": [
+                HumanMessage(content="show users"),
+                AIMessage(content="Found 10 users."),
+                HumanMessage(content="which ones are active?"),
+            ],
             "intent": "chat",
             "result": None,
         }
         chat_node(state, mock_llm, system_prompt="test")
-
         call_args = mock_llm.generate.call_args
         user_message = call_args[1]["user_message"] if "user_message" in call_args[1] else call_args[0][1]
         assert "show users" in user_message
@@ -191,7 +222,21 @@ class TestChatNode:
 
 
 class TestCreateGraph:
-    def test_creates_compiled_graph(self):
+    def test_creates_compiled_graph_with_checkpointer(self):
+        from langgraph.checkpoint.memory import InMemorySaver
+        mock_llm = MagicMock()
+        mock_orchestrator = MagicMock()
+        checkpointer = InMemorySaver()
+        graph = create_graph(
+            orchestrator=mock_orchestrator,
+            llm_client=mock_llm,
+            system_prompt="test prompt",
+            checkpointer=checkpointer,
+        )
+        assert graph is not None
+        assert hasattr(graph, "invoke")
+
+    def test_creates_graph_without_checkpointer(self):
         mock_llm = MagicMock()
         mock_orchestrator = MagicMock()
         graph = create_graph(

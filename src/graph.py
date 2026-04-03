@@ -2,13 +2,15 @@
 LangGraph Intent Routing.
 
 Three-node graph that classifies user input as a database query or chat,
-then routes to the appropriate handler.
+then routes to the appropriate handler. Uses MessagesState for
+checkpointer-backed conversation memory.
 """
 
+from dataclasses import dataclass
 from typing import Any, Optional
 
-from langgraph.graph import StateGraph, END
-from typing_extensions import TypedDict
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.graph import StateGraph, MessagesState, END
 
 from src.logging_config import get_component_logger
 
@@ -50,37 +52,67 @@ Rules:
 - Do not use emojis, special characters, or unicode symbols. Use only plain ASCII text."""
 
 
-class GraphState(TypedDict):
-    input: str
-    conversation_history: Optional[list]
+class GraphState(MessagesState):
     intent: Optional[str]
     result: Optional[dict]
 
 
-def _build_history_context(input_text: str, conversation_history) -> str:
-    """Format conversation history + current input into a user message."""
-    if not conversation_history:
-        return input_text
+@dataclass
+class ConversationTurn:
+    """A question/summary pair extracted from message history for the orchestrator."""
+    question: str
+    summary: str
+
+
+def _extract_history(messages: list) -> tuple[str, list[ConversationTurn] | None]:
+    """Extract the current question and conversation history from messages."""
+    if not messages:
+        return "", None
+
+    current_question = messages[-1].content if messages else ""
+
+    history = []
+    prior = messages[:-1]
+    i = 0
+    while i < len(prior) - 1:
+        if isinstance(prior[i], HumanMessage) and isinstance(prior[i + 1], AIMessage):
+            history.append(ConversationTurn(
+                question=prior[i].content,
+                summary=prior[i + 1].content,
+            ))
+            i += 2
+        else:
+            i += 1
+
+    return current_question, history if history else None
+
+
+def _build_history_context(messages: list) -> str:
+    """Format message history into a user message string for the LLM."""
+    current_question, history = _extract_history(messages)
+
+    if not history:
+        return current_question
 
     lines = ["Previous conversation:"]
-    for turn in conversation_history:
+    for turn in history:
         lines.append(f"User: {turn.question}")
         lines.append(f"Assistant: {turn.summary}")
         lines.append("")
-    lines.append(f"Current message: {input_text}")
+    lines.append(f"Current message: {current_question}")
     return "\n".join(lines)
 
 
 def router_node(state: GraphState, llm_client: Any) -> dict:
     """Classify intent as 'query' or 'chat'."""
-    user_message = _build_history_context(state["input"], state.get("conversation_history"))
+    user_message = _build_history_context(state["messages"])
 
     success, response = llm_client.generate(
         system_prompt=ROUTER_SYSTEM_PROMPT,
         user_message=user_message,
     )
 
-    intent = "query"  # safe default
+    intent = "query"
     if success:
         cleaned = response.strip().lower()
         if cleaned in ("query", "chat"):
@@ -92,17 +124,21 @@ def router_node(state: GraphState, llm_client: Any) -> dict:
 
 def query_node(state: GraphState, orchestrator: Any) -> dict:
     """Run the existing query pipeline via the orchestrator."""
+    current_question, history = _extract_history(state["messages"])
+
     result = orchestrator.process_query(
-        state["input"],
-        conversation_history=state.get("conversation_history"),
+        current_question,
+        conversation_history=history,
     )
     result["type"] = "query"
-    return {"result": result}
+
+    summary = result.get("summary") or result.get("error", "")
+    return {"result": result, "messages": [AIMessage(content=summary)]}
 
 
 def chat_node(state: GraphState, llm_client: Any, system_prompt: str) -> dict:
     """Generate a conversational response."""
-    user_message = _build_history_context(state["input"], state.get("conversation_history"))
+    user_message = _build_history_context(state["messages"])
 
     success, response = llm_client.generate(
         system_prompt=system_prompt,
@@ -114,7 +150,8 @@ def chat_node(state: GraphState, llm_client: Any, system_prompt: str) -> dict:
     else:
         result = {"type": "chat", "success": False, "error": f"Chat generation failed: {response}"}
 
-    return {"result": result}
+    ai_content = response if success else f"Chat generation failed: {response}"
+    return {"result": result, "messages": [AIMessage(content=ai_content)]}
 
 
 def _route_by_intent(state: GraphState) -> str:
@@ -122,15 +159,8 @@ def _route_by_intent(state: GraphState) -> str:
     return state["intent"]
 
 
-def create_graph(orchestrator: Any, llm_client: Any, system_prompt: str):
-    """
-    Build and compile the intent routing graph.
-
-    Args:
-        orchestrator: QueryOrchestrator instance for database queries.
-        llm_client: LLMClient instance for router and chat nodes.
-        system_prompt: System prompt containing schema context (used for chat node).
-    """
+def create_graph(orchestrator: Any, llm_client: Any, system_prompt: str, checkpointer=None):
+    """Build and compile the intent routing graph."""
     chat_system_prompt = CHAT_SYSTEM_PROMPT_TEMPLATE.format(schema_context=system_prompt)
 
     graph = StateGraph(GraphState)
@@ -144,4 +174,4 @@ def create_graph(orchestrator: Any, llm_client: Any, system_prompt: str):
     graph.add_edge("query", END)
     graph.add_edge("chat", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
