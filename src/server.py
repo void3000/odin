@@ -94,11 +94,7 @@ class SessionMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
 
-        # After: no session — pass through unchanged
-        if not session_id:
-            return response
-
-        # Read response body to modify it
+        # Read response body
         response_body = b""
         async for chunk in response.body_iterator:
             if isinstance(chunk, str):
@@ -112,16 +108,20 @@ class SessionMiddleware(BaseHTTPMiddleware):
             return Response(content=response_body, status_code=response.status_code,
                             headers=dict(response.headers), media_type=response.media_type)
 
-        # Append turn on success
-        input_text = body.get("input", "")
-        if result.get("success"):
-            summary = result.get("summary") or result.get("message", "")
-            session_manager.add_turn(session_id, question=input_text, summary=summary)
+        # After: session post-processing
+        if session_id:
+            input_text = body.get("input", "")
+            if result.get("success"):
+                summary = result.get("summary") or result.get("message", "")
+                session_manager.add_turn(session_id, question=input_text, summary=summary)
+            result["session_id"] = session_id
 
-        # Inject session_id
-        result["session_id"] = session_id
-
-        return JSONResponse(content=result, status_code=response.status_code)
+        # Set status code based on result (only for graph responses, not validation errors)
+        if "type" in result:
+            status_code = 200 if result.get("success") else 500
+        else:
+            status_code = response.status_code
+        return JSONResponse(content=result, status_code=status_code)
 
 
 app = FastAPI(title="Odin", description="LLM-to-SQL Pipeline")
@@ -205,9 +205,7 @@ async def query(request: Request, body: QueryRequest):
         {"input": body.input, "conversation_history": conversation_history},
     )
 
-    result = graph_result["result"]
-    status_code = 200 if result.get("success") else 500
-    return JSONResponse(content=result, status_code=status_code)
+    return graph_result["result"]
 
 
 if __name__ == "__main__":
