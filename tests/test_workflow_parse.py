@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 from src.ir.models import QueryIR, TableSource, FieldExpr
 from src.ir.parser import IRParser
-from src.session import ConversationTurn
+from src.graph import ConversationTurn
 from src.workflows.base import PipelineContext
 from src.workflows.parse import ParseWorkflow
 

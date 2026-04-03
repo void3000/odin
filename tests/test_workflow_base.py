@@ -1,6 +1,6 @@
 import pytest
 from src.workflows.base import Workflow, PipelineContext
-from src.session import ConversationTurn
+from src.graph import ConversationTurn
 
 
 class TestPipelineContext:

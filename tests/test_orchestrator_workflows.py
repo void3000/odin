@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from src.ir.models import QueryIR, TableSource, FieldExpr
 from src.orchestrator import QueryOrchestrator
-from src.session import ConversationTurn
+from src.graph import ConversationTurn
 
 
 def _make_query_ir() -> QueryIR:
