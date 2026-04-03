@@ -6,10 +6,10 @@ The orchestrator runs query processing in a thread to avoid blocking the event l
 """
 
 import asyncio
-import argparse
 import json
 import time
 import uuid
+import uvicorn
 from typing import Optional
 
 from fastapi import FastAPI, Request, Response
@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from src.config import settings_from_cli
 from src.db import create_schema_extractor
 from src.llm_client import LLMClient
 from src.llm.nl_to_ir import NaturalLanguageToIR
@@ -137,7 +138,11 @@ def create_app(
     temperature: float = 0.1,
     default_limit: int = 100,
 ) -> FastAPI:
-    """Create and configure the FastAPI app with an orchestrator."""
+    """Create and configure the FastAPI app with an orchestrator.
+
+    Accepts individual parameters for backwards compatibility.
+    Prefer create_app_from_settings() for new code.
+    """
     global orchestrator, session_manager, graph
 
     schema_extractor = create_schema_extractor(db_url)
@@ -181,6 +186,18 @@ def create_app(
     return app
 
 
+def create_app_from_settings(settings) -> FastAPI:
+    """Create and configure the FastAPI app from a ServerSettings instance."""
+    return create_app(
+        db_url=settings.db,
+        llm_base_url=settings.llm_url,
+        llm_api_key=settings.llm_key,
+        llm_model=settings.llm_model,
+        temperature=settings.temperature,
+        default_limit=settings.default_limit,
+    )
+
+
 @app.post("/v1/sessions", status_code=201)
 async def create_session():
     session = session_manager.create()
@@ -209,26 +226,6 @@ async def query(request: Request, body: QueryRequest):
 
 
 if __name__ == "__main__":
-    import uvicorn
-
-    parser = argparse.ArgumentParser(description="Odin API Server")
-    parser.add_argument("--db", required=True, help="Database connection string")
-    parser.add_argument("--host", default="0.0.0.0", help="Server host")
-    parser.add_argument("--port", type=int, default=8000, help="Server port")
-    parser.add_argument("--llm-url", default="http://localhost:1234/v1", help="LLM API base URL")
-    parser.add_argument("--llm-key", default="lmstudio", help="LLM API key")
-    parser.add_argument("--llm-model", default="qwen3.5-27b-claude-4.6-opus-reasoning-distilled", help="LLM model name")
-    parser.add_argument("--temperature", type=float, default=0.1, help="LLM temperature")
-    parser.add_argument("--default-limit", type=int, default=100, help="Default row limit")
-    args = parser.parse_args()
-
-    create_app(
-        db_url=args.db,
-        llm_base_url=args.llm_url,
-        llm_api_key=args.llm_key,
-        llm_model=args.llm_model,
-        temperature=args.temperature,
-        default_limit=args.default_limit,
-    )
-
-    uvicorn.run(app, host=args.host, port=args.port, log_config=get_uvicorn_log_config())
+    settings = settings_from_cli()
+    create_app_from_settings(settings)
+    uvicorn.run(app, host=settings.host, port=settings.port, log_config=get_uvicorn_log_config())

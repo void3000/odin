@@ -9,6 +9,7 @@ description = "LLM-to-SQL Pipeline with Intermediate Representation"
 dependencies = [
     "langgraph",
     "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
     "fastapi",
     "uvicorn[standard]",
 ]
