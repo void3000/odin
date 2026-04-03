@@ -73,10 +73,32 @@ def get_component_logger(component_name: str) -> logging.Logger:
     return logging.getLogger(f"odin.{component_name}")
 
 
-def get_uvicorn_log_config() -> dict:
+def get_uvicorn_log_config(log_file: Optional[str] = None) -> dict:
     """Return a uvicorn log config dict that matches Odin's format."""
     fmt = os.environ.get("ODIN_LOG_FORMAT", LOG_FORMAT)
     level_name = os.environ.get("ODIN_LOG_LEVEL", "INFO").upper()
+    log_file = log_file or os.environ.get("ODIN_LOG_FILE")
+
+    handlers = {
+        "default": {
+            "formatter": "odin",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+            "filters": ["request_id"],
+        },
+    }
+
+    handler_names = ["default"]
+
+    if log_file:
+        handlers["file"] = {
+            "formatter": "odin",
+            "class": "logging.FileHandler",
+            "filename": log_file,
+            "mode": "a",
+            "filters": ["request_id"],
+        }
+        handler_names.append("file")
 
     return {
         "version": 1,
@@ -87,18 +109,11 @@ def get_uvicorn_log_config() -> dict:
         "formatters": {
             "odin": {"format": fmt},
         },
-        "handlers": {
-            "default": {
-                "formatter": "odin",
-                "class": "logging.StreamHandler",
-                "stream": "ext://sys.stderr",
-                "filters": ["request_id"],
-            },
-        },
+        "handlers": handlers,
         "loggers": {
-            "uvicorn": {"handlers": ["default"], "level": level_name, "propagate": False},
-            "uvicorn.error": {"handlers": ["default"], "level": level_name, "propagate": False},
-            "uvicorn.access": {"handlers": ["default"], "level": level_name, "propagate": False},
+            "uvicorn": {"handlers": handler_names, "level": level_name, "propagate": False},
+            "uvicorn.error": {"handlers": handler_names, "level": level_name, "propagate": False},
+            "uvicorn.access": {"handlers": handler_names, "level": level_name, "propagate": False},
         },
     }
 

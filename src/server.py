@@ -7,6 +7,7 @@ The orchestrator runs query processing in a thread to avoid blocking the event l
 
 import asyncio
 import json
+import logging
 import time
 import uuid
 import uvicorn
@@ -24,7 +25,7 @@ from src.llm.nl_to_ir import NaturalLanguageToIR
 from src.orchestrator import QueryOrchestrator
 from src.session import SessionManager
 from src.graph import create_graph
-from src.logging_config import get_component_logger, get_uvicorn_log_config, request_id_var
+from src.logging_config import get_component_logger, get_uvicorn_log_config, request_id_var, setup_logging
 
 logger = get_component_logger("server")
 
@@ -227,5 +228,14 @@ async def query(request: Request, body: QueryRequest):
 
 if __name__ == "__main__":
     settings = settings_from_cli()
+    setup_logging(
+        log_level=logging.getLevelName(settings.log_level.upper()),
+        log_file=settings.log_file,
+    )
     create_app_from_settings(settings)
-    uvicorn.run(app, host=settings.host, port=settings.port, log_config=get_uvicorn_log_config())
+    uvicorn.run(
+        app,
+        host=settings.host,
+        port=settings.port,
+        log_config=get_uvicorn_log_config(log_file=settings.log_file),
+    )

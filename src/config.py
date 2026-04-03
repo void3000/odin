@@ -21,6 +21,8 @@ class ServerSettings(BaseSettings):
     )
     temperature: float = Field(default=0.1, description="LLM temperature")
     default_limit: int = Field(default=100, description="Default row limit")
+    log_level: str = Field(default="INFO", description="Log level (DEBUG, INFO, WARNING, ERROR)")
+    log_file: str | None = Field(default=None, description="Path to log file")
 
 
 def settings_from_cli(argv: list[str] | None = None) -> ServerSettings:
