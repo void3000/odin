@@ -197,17 +197,12 @@ async def delete_session(session_id: str):
 
 
 @app.post("/v1/query")
-async def query(request: Request):
-    body = await request.json()
-    input_text = body.get("input")
-    if input_text is None:
-        return JSONResponse(status_code=422, content={"error": "Field 'input' is required"})
-
+async def query(request: Request, body: QueryRequest):
     conversation_history = getattr(request.state, "conversation_history", None)
 
     graph_result = await asyncio.to_thread(
         graph.invoke,
-        {"input": input_text, "conversation_history": conversation_history},
+        {"input": body.input, "conversation_history": conversation_history},
     )
 
     result = graph_result["result"]
