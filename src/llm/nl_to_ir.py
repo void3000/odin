@@ -97,9 +97,12 @@ The IR is a JSON object with these fields:
    {{"table": "table_name"}}
 
 3. "fields": List of columns to retrieve
-   [{{"field": "column_name", "table": "table_name", "alias": "optional_alias"}}]
+   [{{"field": "column_name", "table": "table_name", "alias": "optional_alias", "function": "optional_aggregate"}}]
    - Use "table" when joining multiple tables
    - Use "alias" to rename output columns
+   - Use "function" for aggregates: "COUNT", "SUM", "AVG", "MIN", "MAX"
+   - COUNT can use "*" as the field (e.g., {{"field": "*", "function": "COUNT"}})
+   - SUM, AVG, MIN, MAX require a specific column name
 
 4. "joins": Optional list of JOIN operations
    [{{
@@ -168,6 +171,15 @@ Query: "Show rock tracks longer than 5 minutes, sorted by duration"
     ]
   }},
   "order_by": [{{"field": "Milliseconds", "table": "Track", "direction": "DESC"}}]
+}}
+
+Query: "How many artists are there?"
+{{
+  "operation": "SELECT",
+  "source": {{"table": "Artist"}},
+  "fields": [
+    {{"field": "*", "function": "COUNT", "alias": "artist_count"}}
+  ]
 }}
 
 IMPORTANT RULES:
