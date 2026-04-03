@@ -11,7 +11,7 @@ import time
 import uuid
 from typing import Optional
 
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -58,6 +58,44 @@ graph = None
 class QueryRequest(BaseModel):
     input: str
     session_id: Optional[str] = None
+
+
+class SessionContext:
+    """Resolved session state for a query request."""
+
+    def __init__(self, session_id: Optional[str], conversation_history: Optional[list]):
+        self.session_id = session_id
+        self.conversation_history = conversation_history
+
+    def append_turn(self, question: str, result: dict) -> None:
+        """Append a turn to the session if active and result was successful."""
+        if not self.session_id or not result.get("success"):
+            return
+        summary = result.get("summary") or result.get("message", "")
+        session_manager.add_turn(self.session_id, question=question, summary=summary)
+
+    def attach_to_result(self, result: dict) -> dict:
+        """Add session_id to the result if session is active."""
+        if self.session_id:
+            result["session_id"] = self.session_id
+        return result
+
+
+async def get_session_context(request: Request) -> SessionContext:
+    """FastAPI dependency that resolves session state from the request body."""
+    body = await request.json()
+    session_id = body.get("session_id")
+
+    if not session_id:
+        return SessionContext(session_id=None, conversation_history=None)
+
+    session = session_manager.get(session_id)
+    if session is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Session not found or expired")
+
+    history = session_manager.get_history(session_id)
+    return SessionContext(session_id=session_id, conversation_history=history)
 
 
 def create_app(
@@ -128,39 +166,18 @@ async def delete_session(session_id: str):
 
 
 @app.post("/v1/query")
-async def query(request: QueryRequest):
-    conversation_history = None
-    session_id = request.session_id
-
-    if session_id:
-        session = session_manager.get(session_id)
-        if session is None:
-            return JSONResponse(
-                status_code=404,
-                content={"error": "Session not found or expired"},
-            )
-        conversation_history = session_manager.get_history(session_id)
-
+async def query(request: QueryRequest, session: SessionContext = Depends(get_session_context)):
     graph_result = await asyncio.to_thread(
         graph.invoke,
         {
             "input": request.input,
-            "conversation_history": conversation_history,
+            "conversation_history": session.conversation_history,
         },
     )
 
     result = graph_result["result"]
-
-    if session_id and result.get("success"):
-        summary = result.get("summary") or result.get("message", "")
-        session_manager.add_turn(
-            session_id,
-            question=request.input,
-            summary=summary,
-        )
-
-    if session_id:
-        result["session_id"] = session_id
+    session.append_turn(request.input, result)
+    session.attach_to_result(result)
 
     status_code = 200 if result.get("success") else 500
     return JSONResponse(content=result, status_code=status_code)
