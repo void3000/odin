@@ -60,12 +60,37 @@ class QueryRequest(BaseModel):
     session_id: Optional[str] = None
 
 
-async def process_query(request: Request) -> dict:
+class SessionContext:
+    """Resolved session state for a request."""
+
+    def __init__(self, session_id: Optional[str] = None, conversation_history: Optional[list] = None):
+        self.session_id = session_id
+        self.conversation_history = conversation_history
+
+
+async def get_session_context(request: Request) -> SessionContext:
+    """FastAPI dependency that resolves session state from the request body."""
+    from fastapi import HTTPException
+
+    body = await request.json()
+    session_id = body.get("session_id")
+
+    if not session_id:
+        return SessionContext()
+
+    session = session_manager.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found or expired")
+
+    history = session_manager.get_history(session_id)
+    return SessionContext(session_id=session_id, conversation_history=history)
+
+
+async def process_query(request: Request, session: SessionContext = Depends(get_session_context)) -> dict:
     """FastAPI dependency that handles the full query lifecycle.
 
-    Resolves session context, invokes the graph, appends turns,
-    and returns the final result dict. The endpoint knows nothing
-    about sessions.
+    Uses SessionContext for session state. The endpoint receives
+    only the final result dict.
     """
     from fastapi import HTTPException
 
@@ -73,29 +98,20 @@ async def process_query(request: Request) -> dict:
     input_text = body.get("input")
     if input_text is None:
         raise HTTPException(status_code=422, detail="Field 'input' is required")
-    session_id = body.get("session_id")
-
-    # Resolve session
-    conversation_history = None
-    if session_id:
-        session = session_manager.get(session_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail="Session not found or expired")
-        conversation_history = session_manager.get_history(session_id)
 
     # Invoke graph
     graph_result = await asyncio.to_thread(
         graph.invoke,
-        {"input": input_text, "conversation_history": conversation_history},
+        {"input": input_text, "conversation_history": session.conversation_history},
     )
     result = graph_result["result"]
 
     # Post-process session
-    if session_id:
+    if session.session_id:
         if result.get("success"):
             summary = result.get("summary") or result.get("message", "")
-            session_manager.add_turn(session_id, question=input_text, summary=summary)
-        result["session_id"] = session_id
+            session_manager.add_turn(session.session_id, question=input_text, summary=summary)
+        result["session_id"] = session.session_id
 
     return result
 
