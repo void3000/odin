@@ -61,7 +61,7 @@ class QueryOrchestrator:
         logger.info(f"QueryOrchestrator initialized for database: {db_url}")
         logger.debug(f"Schema contains {len(schema)} tables")
 
-    def process_query(self, natural_language: str) -> Dict[str, Any]:
+    def process_query(self, natural_language: str, conversation_history=None) -> Dict[str, Any]:
         """Process a natural language query through the complete pipeline."""
         logger.info(f"Processing query: {natural_language}")
 
@@ -69,6 +69,7 @@ class QueryOrchestrator:
             natural_language=natural_language,
             db_url=self.db_url,
             schema=self.schema,
+            conversation_history=conversation_history,
         )
 
         for step in self.steps:

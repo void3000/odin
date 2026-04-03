@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from src.ir.models import QueryIR, TableSource, FieldExpr
 from src.orchestrator import QueryOrchestrator
+from src.session import ConversationTurn
 
 
 def _make_query_ir() -> QueryIR:
@@ -17,7 +18,7 @@ class TestOrchestratorWorkflows:
         self.schema = {"users": {"columns": {"id": {"type": "int"}, "name": {"type": "str"}}}}
         self.mock_llm = MagicMock()
         self.orchestrator = QueryOrchestrator(
-            db_path="/tmp/test.db",
+            db_url="sqlite:///tmp/test.db",
             llm_client=self.mock_llm,
             system_prompt="You are a SQL parser.",
             schema=self.schema,
@@ -73,3 +74,51 @@ class TestOrchestratorWorkflows:
 
         assert "parse_ms" in result["metadata"]["timings"]
         assert "total_ms" in result["metadata"]["timings"]
+
+
+class TestOrchestratorWithHistory:
+    def test_process_query_passes_history_to_context(self):
+        """Verify conversation_history flows into PipelineContext."""
+        mock_llm = MagicMock()
+        orchestrator = QueryOrchestrator(
+            db_url="sqlite:///test.db",
+            llm_client=mock_llm,
+            system_prompt="test",
+            schema={"users": {"columns": {"id": {"type": "int"}}}},
+        )
+
+        history = [ConversationTurn(question="q1", summary="s1")]
+
+        captured_contexts = []
+
+        def capture_execute(ctx):
+            captured_contexts.append(ctx)
+            ctx.error = "stop early"
+            return ctx
+
+        orchestrator.steps[0].execute = capture_execute
+        orchestrator.process_query("test query", conversation_history=history)
+
+        assert len(captured_contexts) == 1
+        assert captured_contexts[0].conversation_history == history
+
+    def test_process_query_without_history_defaults_none(self):
+        mock_llm = MagicMock()
+        orchestrator = QueryOrchestrator(
+            db_url="sqlite:///test.db",
+            llm_client=mock_llm,
+            system_prompt="test",
+            schema={"users": {"columns": {"id": {"type": "int"}}}},
+        )
+
+        captured_contexts = []
+
+        def capture_execute(ctx):
+            captured_contexts.append(ctx)
+            ctx.error = "stop early"
+            return ctx
+
+        orchestrator.steps[0].execute = capture_execute
+        orchestrator.process_query("test query")
+
+        assert captured_contexts[0].conversation_history is None
