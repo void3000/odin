@@ -20,6 +20,7 @@ from src.db import create_schema_extractor
 from src.llm_client import LLMClient
 from src.llm.nl_to_ir import NaturalLanguageToIR
 from src.orchestrator import QueryOrchestrator
+from src.session import SessionManager
 from src.logging_config import get_component_logger, get_uvicorn_log_config, request_id_var
 
 logger = get_component_logger("server")
@@ -49,10 +50,12 @@ app.add_middleware(RequestIdMiddleware)
 
 
 orchestrator: Optional[QueryOrchestrator] = None
+session_manager: Optional[SessionManager] = None
 
 
 class QueryRequest(BaseModel):
     question: str
+    session_id: Optional[str] = None
 
 
 def create_app(
@@ -64,7 +67,7 @@ def create_app(
     default_limit: int = 100,
 ) -> FastAPI:
     """Create and configure the FastAPI app with an orchestrator."""
-    global orchestrator
+    global orchestrator, session_manager
 
     schema_extractor = create_schema_extractor(db_url)
     schema = schema_extractor.extract_schema()
@@ -96,12 +99,55 @@ def create_app(
         search_path=search_path,
     )
 
+    session_manager = SessionManager()
     return app
+
+
+@app.post("/v1/sessions", status_code=201)
+async def create_session():
+    session = session_manager.create()
+    return {"session_id": session.session_id}
+
+
+@app.delete("/v1/sessions/{session_id}", status_code=204)
+async def delete_session(session_id: str):
+    if not session_manager.delete(session_id):
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Session not found or expired"},
+        )
 
 
 @app.post("/v1/query")
 async def query(request: QueryRequest):
-    result = await asyncio.to_thread(orchestrator.process_query, request.question)
+    conversation_history = None
+    session_id = request.session_id
+
+    if session_id:
+        session = session_manager.get(session_id)
+        if session is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Session not found or expired"},
+            )
+        conversation_history = session_manager.get_history(session_id)
+
+    result = await asyncio.to_thread(
+        orchestrator.process_query,
+        request.question,
+        conversation_history=conversation_history,
+    )
+
+    if session_id and result.get("success"):
+        session_manager.add_turn(
+            session_id,
+            question=request.question,
+            summary=result.get("summary", ""),
+        )
+
+    if session_id:
+        result["session_id"] = session_id
+
     status_code = 200 if result.get("success") else 500
     return JSONResponse(content=result, status_code=status_code)
 
