@@ -101,29 +101,39 @@ class IRValidator:
         errors = []
         table_schema = self.schema.get(source_table, {})
         available_columns = set(table_schema.get("columns", {}).keys())
-        
+
         for field in fields:
+            # Handle aggregate functions
+            if getattr(field, "function", None) is not None:
+                if field.field == "*":
+                    # Only COUNT supports *
+                    if field.function != "COUNT":
+                        error_msg = f"Only COUNT supports *, not {field.function}"
+                        errors.append(error_msg)
+                        logger.error(error_msg)
+                    continue  # COUNT(*) is always valid, skip column check
+
             if field.field == "*":
                 continue  # Wildcard is always valid
-            
+
             # Determine which table to check against
             target_table = field.table or source_table
-            
+
             if target_table not in self.tables:
                 error_msg = f"Field '{field.field}' references unknown table '{target_table}'"
                 errors.append(error_msg)
                 logger.error(error_msg)
                 continue
-            
+
             # Check if column exists in the specified table
             target_schema = self.schema.get(target_table, {})
             target_columns = set(target_schema.get("columns", {}).keys())
-            
+
             if field.field not in target_columns:
                 error_msg = f"Column '{field.field}' does not exist in table '{target_table}'. Available: {', '.join(sorted(target_columns))}"
                 errors.append(error_msg)
                 logger.error(error_msg)
-        
+
         return errors
     
     def _validate_joins(self, joins: List[JoinExpr], source_table: str) -> List[str]:
