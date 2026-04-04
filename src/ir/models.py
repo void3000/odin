@@ -242,13 +242,19 @@ class OrderExpr(BaseModel):
     }
 
 
+class TimeRange(BaseModel):
+    """Time window for log/metric queries."""
+    start: str = Field(..., description="Start time (ISO 8601 or relative, e.g. '1h ago')")
+    end: str | None = Field(None, description="End time (None means 'now')")
+
+
 class QueryIR(BaseModel):
     """
     Root structure representing a complete SQL query.
 
     This is the main IR structure that the LLM generates when converting
     natural language to SQL.
-    
+
     Attributes:
         operation: Query operation (currently only SELECT is supported)
         source: Primary table to query
@@ -257,6 +263,8 @@ class QueryIR(BaseModel):
         filters: Optional WHERE clause conditions (supports AND/OR trees)
         order_by: Optional sorting specifications
         limit: Optional row limit
+        time_range: Optional time window for log/metric sources
+        full_text: Optional full-text search string
     """
     operation: Literal["SELECT"] = Field(
         ..., description="Query operation (currently only SELECT is supported)"
@@ -271,6 +279,8 @@ class QueryIR(BaseModel):
     )
     order_by: List[OrderExpr] | None = Field(None, description="Optional sorting specifications")
     limit: int | None = Field(None, description="Optional row limit", ge=1)
+    time_range: TimeRange | None = Field(None, description="Optional time window for log/metric sources")
+    full_text: str | None = Field(None, description="Optional full-text search string")
 
     @model_validator(mode="after")
     def validate_query(self) -> "QueryIR":

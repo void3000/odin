@@ -11,6 +11,7 @@ from src.ir.models import (
     ConditionExpr,
     LogicalExpr,
     OrderExpr,
+    TimeRange,
 )
 
 
@@ -405,3 +406,43 @@ class TestFieldExprAggregates:
         assert len(query.joins) == 1
         assert isinstance(query.filters, LogicalExpr)
         assert len(query.order_by) == 1
+
+
+class TestTimeRange:
+    def test_time_range_relative(self):
+        tr = TimeRange(start="1h ago")
+        assert tr.start == "1h ago"
+        assert tr.end is None
+
+    def test_time_range_absolute(self):
+        tr = TimeRange(start="2026-04-04T00:00:00Z", end="2026-04-04T12:00:00Z")
+        assert tr.end == "2026-04-04T12:00:00Z"
+
+
+class TestQueryIRExtensions:
+    def test_query_ir_with_time_range(self):
+        ir = QueryIR(
+            operation="SELECT",
+            source=TableSource(table="app_logs"),
+            fields=[FieldExpr(field="message")],
+            time_range=TimeRange(start="1h ago"),
+        )
+        assert ir.time_range.start == "1h ago"
+
+    def test_query_ir_with_full_text(self):
+        ir = QueryIR(
+            operation="SELECT",
+            source=TableSource(table="app_logs"),
+            fields=[FieldExpr(field="message")],
+            full_text="NullPointerException",
+        )
+        assert ir.full_text == "NullPointerException"
+
+    def test_query_ir_extensions_default_none(self):
+        ir = QueryIR(
+            operation="SELECT",
+            source=TableSource(table="users"),
+            fields=[FieldExpr(field="*")],
+        )
+        assert ir.time_range is None
+        assert ir.full_text is None
