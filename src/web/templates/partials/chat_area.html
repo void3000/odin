@@ -8,7 +8,11 @@
 <div class="chat-messages" id="chat-messages">
     {% for msg in messages %}
     <div class="message {{ msg.role }}">
+        {% if msg.role == "assistant" %}
+        <div class="markdown-content">{{ msg.content }}</div>
+        {% else %}
         {{ msg.content }}
+        {% endif %}
     </div>
     {% endfor %}
     {% if not messages %}
@@ -26,6 +30,9 @@
     {% if active_session %}
     activeSession = '{{ active_session }}';
     {% endif %}
+    document.querySelectorAll('.markdown-content').forEach(function(el) {
+        el.innerHTML = marked.parse(el.textContent);
+    });
     var chatMessages = document.getElementById('chat-messages');
     if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
 </script>

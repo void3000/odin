@@ -1,3 +1,13 @@
 <div class="message {{ role }}">
+    {% if role == "assistant" %}
+    <div class="markdown-content">{{ content }}</div>
+    <script>
+        (function() {
+            var el = document.currentScript.previousElementSibling;
+            el.innerHTML = marked.parse(el.textContent);
+        })();
+    </script>
+    {% else %}
     {{ content }}
+    {% endif %}
 </div>
