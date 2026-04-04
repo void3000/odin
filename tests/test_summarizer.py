@@ -161,5 +161,6 @@ class TestOrchestratorSummarization:
 
         result = orchestrator.process_query("Show me all users")
 
+        # Non-parse/validate failures return generic message, real error is logged
         assert result["success"] is False
-        assert result["error"] == "API error"
+        assert result["summary"] == "Sorry, I wasn't able to process that query. Please try rephrasing your question."

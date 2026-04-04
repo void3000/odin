@@ -318,5 +318,10 @@ class PostgreSQLConnector:
 
     @staticmethod
     def _convert_placeholders(sql: str) -> str:
-        """Convert ?-style placeholders to psycopg2 %s style."""
-        return sql.replace("?", "%s")
+        """Convert ?-style or $N-style placeholders to psycopg2 %s style."""
+        import re
+        # Convert $1, $2, ... to %s
+        converted = re.sub(r'\$\d+', '%s', sql)
+        # Convert ? to %s (for SQLite-style queries)
+        converted = converted.replace("?", "%s")
+        return converted
