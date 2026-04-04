@@ -1,13 +1,8 @@
-<div class="message-row {{ role }}">
-    <div class="message-avatar">{% if role == "assistant" %}O{% else %}Y{% endif %}</div>
-    <div class="message-body">
-        <div class="message-sender">{% if role == "assistant" %}Odin{% else %}You{% endif %}</div>
-        <div class="message-content">
-            {% if role == "assistant" %}
-            <div class="markdown-content">{{ content }}</div>
-            {% else %}
-            {{ content }}
-            {% endif %}
-        </div>
-    </div>
+<div class="message {{ role }}">
+    <div class="message-label">{% if role == "assistant" %}Odin{% else %}You{% endif %}</div>
+    {% if role == "assistant" %}
+    <div class="markdown-content">{{ content }}</div>
+    {% else %}
+    {{ content }}
+    {% endif %}
 </div>

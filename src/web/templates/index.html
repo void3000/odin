@@ -100,13 +100,12 @@
         if (emptyState) emptyState.remove();
 
         const userMsg = document.createElement('div');
-        userMsg.className = 'message-row user';
-        userMsg.innerHTML = `
-            <div class="message-avatar">Y</div>
-            <div class="message-body">
-                <div class="message-sender">You</div>
-                <div class="message-content">${text.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-            </div>`;
+        userMsg.className = 'message user';
+        const label = document.createElement('div');
+        label.className = 'message-label';
+        label.textContent = 'You';
+        userMsg.appendChild(label);
+        userMsg.appendChild(document.createTextNode(text));
         messagesDiv.appendChild(userMsg);
 
         const typing = document.createElement('div');
