@@ -73,6 +73,20 @@ class IRParser:
                     "error": stripped,
                 }
 
+            # Check if the LLM returned a JSON error object instead of IR
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, dict) and "error" in parsed:
+                    error_info = parsed["error"]
+                    msg = error_info.get("message", str(error_info)) if isinstance(error_info, dict) else str(error_info)
+                    logger.info(f"LLM returned error object: {msg}")
+                    return {
+                        "success": False,
+                        "error": msg,
+                    }
+            except json.JSONDecodeError:
+                pass  # Will be caught below
+
             # Parse and validate as QueryIR
             try:
                 query_ir = QueryIR.model_validate_json(ir_json)
