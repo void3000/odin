@@ -21,8 +21,7 @@ router = APIRouter()
 async def index(request: Request):
     """Main page — sidebar + chat area."""
     session_names = _get_session_names()
-    return templates.TemplateResponse("index.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "index.html", context={
         "sessions": session_names,
         "active_session": None,
         "messages": [],
@@ -35,8 +34,7 @@ async def create_session(request: Request):
     session_id = str(uuid.uuid4())
     server_module.sessions.add(session_id)
     session_names = _get_session_names()
-    return templates.TemplateResponse("partials/sidebar.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "partials/sidebar.html", context={
         "sessions": session_names,
         "active_session": session_id,
     })
@@ -47,8 +45,7 @@ async def delete_session(request: Request, session_id: str):
     """Delete a session, return updated sidebar partial."""
     server_module.sessions.discard(session_id)
     session_names = _get_session_names()
-    return templates.TemplateResponse("partials/sidebar.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "partials/sidebar.html", context={
         "sessions": session_names,
         "active_session": None,
     })
@@ -58,8 +55,7 @@ async def delete_session(request: Request, session_id: str):
 async def load_session(request: Request, session_id: str):
     """Load a session's chat history, return chat area partial."""
     messages = _get_session_messages(session_id)
-    return templates.TemplateResponse("partials/chat_area.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "partials/chat_area.html", context={
         "active_session": session_id,
         "messages": messages,
     })
@@ -86,8 +82,7 @@ async def chat(request: Request, input: str = Form(...), session_id: str = Form(
     else:
         content = f"Error: {result.get('error', 'Unknown error')}"
 
-    return templates.TemplateResponse("partials/message.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "partials/message.html", context={
         "role": "assistant",
         "content": content,
     })
@@ -98,8 +93,7 @@ async def refresh_sidebar(request: Request):
     """Return the sidebar partial (for refreshing after a query)."""
     session_names = _get_session_names()
     active = request.query_params.get("active")
-    return templates.TemplateResponse("partials/sidebar.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "partials/sidebar.html", context={
         "sessions": session_names,
         "active_session": active,
     })
