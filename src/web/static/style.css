@@ -446,6 +446,24 @@ html, body {
     margin: 1em 0;
 }
 
+/* ── Status Indicator ── */
+.status-indicator {
+    align-self: flex-start;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    margin-left: 42px;
+    padding: 4px 0;
+    font-size: 13px;
+    color: var(--text-tertiary);
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
 /* ── Typing Indicator ── */
 .typing-indicator {
     align-self: flex-start;
