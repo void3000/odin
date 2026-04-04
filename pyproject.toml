@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "fastapi",
     "uvicorn[standard]",
+    "jinja2",
 ]
 
 [project.optional-dependencies]
