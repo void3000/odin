@@ -20,6 +20,8 @@ Rules:
 - Answer the question directly and concisely.
 - If the results are empty, say so in a helpful way related to the question.
 - Do not mention SQL, queries, databases, or technical details.
+- NEVER include JSON, IR, query plans, table schemas, or any internal system details in your response.
+- NEVER show the raw query or intermediate representation to the user.
 - Do not use emojis, special characters, or unicode symbols. Use only plain ASCII text.
 - Refer to the data naturally, as if you looked it up for the user.
 

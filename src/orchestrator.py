@@ -79,12 +79,10 @@ class QueryOrchestrator:
         instead of exposing internal state to the client.
         """
         if context.error and context.failed_stage in ("parse", "validate"):
-            # Parse/validate failures often contain useful info for the user
-            # (e.g., "INSERT not supported" or "table 'artists' not found")
-            # Surface them as a helpful response, not an error.
+            logger.warning(f"Pipeline failed at {context.failed_stage}: {context.error}")
             return {
                 "success": True,
-                "summary": context.error,
+                "summary": "Sorry, I wasn't able to understand that query. Please try rephrasing your question.",
             }
 
         result: Dict[str, Any] = {
@@ -130,9 +128,9 @@ class QueryOrchestrator:
             callback("status", {"stage": step.name, "message": msg})
             context = step.execute(context)
             if context.error:
-                # Surface parse/validate errors as friendly messages
+                logger.warning(f"Pipeline failed at {context.failed_stage}: {context.error}")
                 if context.failed_stage in ("parse", "validate"):
-                    callback("token", {"content": context.error})
+                    callback("token", {"content": "Sorry, I wasn't able to understand that query. Please try rephrasing your question."})
                     callback("done", {"success": True})
                 else:
                     callback("token", {"content": "Sorry, I wasn't able to process that query. Please try rephrasing your question."})

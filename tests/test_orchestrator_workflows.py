@@ -70,9 +70,9 @@ class TestOrchestratorWorkflows:
 
         result = self.orchestrator.process_query("bad query")
 
-        # Parse failures are surfaced as friendly summaries, not errors
+        # Parse failures return a generic message, not internal details
         assert result["success"] is True
-        assert result["summary"] == "Invalid JSON"
+        assert "rephrasing" in result["summary"]
 
 
 class TestOrchestratorWithHistory:
