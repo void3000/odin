@@ -1,0 +1,21 @@
+<div class="session-list" id="session-list">
+    {% for session in sessions %}
+    <div class="session-item {% if session.id == active_session %}active{% endif %}"
+         hx-get="/sessions/{{ session.id }}"
+         hx-target="#chat-area"
+         hx-swap="innerHTML"
+         onclick="setActiveSession('{{ session.id }}', this)">
+        <button class="session-delete"
+                hx-delete="/sessions/{{ session.id }}"
+                hx-target="#sidebar-content"
+                hx-swap="innerHTML"
+                onclick="event.stopPropagation(); if(getActiveSession() === '{{ session.id }}') clearChat();"
+                title="Delete session">&times;</button>
+        <div class="session-name">{{ session.name }}</div>
+        <div class="session-meta">{{ session.turn_count }} turn{{ 's' if session.turn_count != 1 else '' }}</div>
+    </div>
+    {% endfor %}
+    {% if not sessions %}
+    <div style="padding: 12px; color: #585b70; font-size: 13px;">No sessions yet</div>
+    {% endif %}
+</div>

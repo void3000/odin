@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block body %}
+<div class="app-layout">
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h2>Odin</h2>
+            <button class="btn-new-session"
+                    hx-post="/sessions"
+                    hx-target="#sidebar-content"
+                    hx-swap="innerHTML">+ New</button>
+        </div>
+        <div id="sidebar-content">
+            {% include "partials/sidebar.html" %}
+        </div>
+        <div class="sidebar-footer">
+            <label>
+                <input type="checkbox" id="single-query-toggle"
+                       onchange="toggleSingleQuery(this.checked)" checked>
+                Single query mode
+            </label>
+        </div>
+    </div>
+    <div class="chat-area" id="chat-area">
+        <div class="chat-header">Single Query</div>
+        <div class="chat-messages" id="chat-messages">
+            <div class="empty-state">Ask a question about your data</div>
+        </div>
+        <div class="chat-input-area">
+            <form class="chat-input-form" onsubmit="return sendMessage(event)">
+                <input type="hidden" name="session_id" id="session-id-input" value="">
+                <input type="text" name="input" id="chat-input" placeholder="Ask a question about your data..." autocomplete="off" required>
+                <button type="submit">Send</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    let activeSession = null;
+
+    function getActiveSession() { return activeSession; }
+
+    function setActiveSession(sessionId, element) {
+        activeSession = sessionId;
+        document.getElementById('session-id-input').value = sessionId;
+        document.getElementById('single-query-toggle').checked = false;
+        document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+        if (element) element.classList.add('active');
+    }
+
+    function clearChat() {
+        activeSession = null;
+        document.getElementById('session-id-input').value = '';
+        document.getElementById('single-query-toggle').checked = true;
+        document.getElementById('chat-area').innerHTML = `
+            <div class="chat-header">Single Query</div>
+            <div class="chat-messages" id="chat-messages">
+                <div class="empty-state">Ask a question about your data</div>
+            </div>
+            <div class="chat-input-area">
+                <form class="chat-input-form" onsubmit="return sendMessage(event)">
+                    <input type="hidden" name="session_id" id="session-id-input" value="">
+                    <input type="text" name="input" id="chat-input" placeholder="Ask a question about your data..." autocomplete="off" required>
+                    <button type="submit">Send</button>
+                </form>
+            </div>`;
+    }
+
+    function toggleSingleQuery(checked) {
+        if (checked) {
+            activeSession = null;
+            document.getElementById('session-id-input').value = '';
+            document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+            clearChat();
+        }
+    }
+
+    function sendMessage(event) {
+        event.preventDefault();
+        const input = document.getElementById('chat-input');
+        const messagesDiv = document.getElementById('chat-messages');
+        const text = input.value.trim();
+        if (!text) return false;
+
+        const emptyState = messagesDiv.querySelector('.empty-state');
+        if (emptyState) emptyState.remove();
+
+        const userMsg = document.createElement('div');
+        userMsg.className = 'message user';
+        userMsg.textContent = text;
+        messagesDiv.appendChild(userMsg);
+
+        const typing = document.createElement('div');
+        typing.className = 'typing-indicator';
+        typing.id = 'typing-indicator';
+        typing.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+        messagesDiv.appendChild(typing);
+
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+        const sessionId = document.getElementById('session-id-input').value;
+        const formData = new FormData();
+        formData.append('input', text);
+        formData.append('session_id', sessionId);
+
+        fetch('/chat', { method: 'POST', body: formData })
+            .then(response => response.text())
+            .then(html => {
+                const indicator = document.getElementById('typing-indicator');
+                if (indicator) {
+                    indicator.outerHTML = html;
+                }
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                if (sessionId) {
+                    htmx.ajax('GET', '/sidebar', { target: '#sidebar-content', swap: 'innerHTML' });
+                }
+            })
+            .catch(() => {
+                const indicator = document.getElementById('typing-indicator');
+                if (indicator) {
+                    indicator.outerHTML = '<div class="message assistant">Error: Failed to connect to server.</div>';
+                }
+            });
+
+        input.value = '';
+        return false;
+    }
+</script>
+{% endblock %}

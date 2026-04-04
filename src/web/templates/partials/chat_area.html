@@ -1,0 +1,31 @@
+<div class="chat-header">
+    {% if active_session %}
+        Session
+    {% else %}
+        Single Query
+    {% endif %}
+</div>
+<div class="chat-messages" id="chat-messages">
+    {% for msg in messages %}
+    <div class="message {{ msg.role }}">
+        {{ msg.content }}
+    </div>
+    {% endfor %}
+    {% if not messages %}
+    <div class="empty-state">Ask a question about your data</div>
+    {% endif %}
+</div>
+<div class="chat-input-area">
+    <form class="chat-input-form" onsubmit="return sendMessage(event)">
+        <input type="hidden" name="session_id" id="session-id-input" value="{{ active_session or '' }}">
+        <input type="text" name="input" id="chat-input" placeholder="Ask a question about your data..." autocomplete="off" required>
+        <button type="submit">Send</button>
+    </form>
+</div>
+<script>
+    {% if active_session %}
+    activeSession = '{{ active_session }}';
+    {% endif %}
+    var chatMessages = document.getElementById('chat-messages');
+    if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+</script>
