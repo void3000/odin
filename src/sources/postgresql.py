@@ -55,6 +55,9 @@ class PostgreSQLSource:
     def get_schema(self) -> SourceSchema:
         extractor = create_schema_extractor(self.url)
         db_schema = extractor.extract_schema()
+        # Capture discovered schemas as search_path for queries
+        if hasattr(extractor, "schemas") and extractor.schemas:
+            self.search_path = extractor.schemas
         collections = []
         for table in db_schema.tables:
             fields = [
