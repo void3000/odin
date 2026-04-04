@@ -77,3 +77,29 @@ class ResultSummarizer:
             logger.error(f"Summarization failed: {response}")
 
         return success, response
+
+    def summarize_stream(
+        self,
+        question: str,
+        results: List[Any],
+        sql: str
+    ):
+        """
+        Stream a summary of query results token by token.
+
+        Args:
+            question: The original natural language question.
+            results: List of result rows.
+            sql: The SQL query that was executed.
+
+        Yields:
+            Content string tokens as they arrive from the LLM.
+        """
+        user_message = (
+            f"User's question: {question}\n\n"
+            f"SQL executed: {sql}\n\n"
+            f"Results ({len(results)} rows):\n{json.dumps(results, indent=2, default=str)}"
+        )
+
+        logger.debug(f"Streaming summary for {len(results)} rows")
+        yield from self.llm_client.generate_stream(SUMMARIZE_SYSTEM_PROMPT, user_message)
