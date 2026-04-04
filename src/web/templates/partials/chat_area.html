@@ -16,13 +16,16 @@
     </div>
     {% endfor %}
     {% if not messages %}
-    <div class="empty-state">Ask a question about your data</div>
+    <div class="empty-state">
+        <div class="empty-state-title">What would you like to know?</div>
+        <div class="empty-state-subtitle">Ask a question about your data in plain English</div>
+    </div>
     {% endif %}
 </div>
 <div class="chat-input-area">
     <form class="chat-input-form" onsubmit="return sendMessage(event)">
         <input type="hidden" name="session_id" id="session-id-input" value="{{ active_session or '' }}">
-        <input type="text" name="input" id="chat-input" placeholder="Ask a question about your data..." autocomplete="off" required>
+        <input type="text" name="input" id="chat-input" placeholder="Ask a question..." autocomplete="off" required>
         <button type="submit">Send</button>
     </form>
 </div>
