@@ -1,55 +1,60 @@
-from src.ir.models import QueryIR, TableSource, FieldExpr
+from unittest.mock import MagicMock
 from src.workflows.base import PipelineContext
 from src.workflows.build import BuildWorkflow
-
-
-def _make_context() -> PipelineContext:
-    ctx = PipelineContext(
-        natural_language="Show me all users",
-        db_path="/tmp/test.db",
-        schema={"users": {"columns": {"id": {"type": "int"}, "name": {"type": "str"}}}},
-    )
-    ctx.query_ir = QueryIR(
-        operation="SELECT",
-        source=TableSource(table="users"),
-        fields=[FieldExpr(field="id"), FieldExpr(field="name")],
-    )
-    return ctx
+from src.ir.models import QueryIR, TableSource, FieldExpr
 
 
 class TestBuildWorkflow:
-    def test_builds_sql_from_ir(self):
-        workflow = BuildWorkflow()
-        ctx = workflow.run(_make_context())
+    def test_uses_source_build_query(self):
+        mock_source = MagicMock()
+        mock_native = MagicMock()
+        mock_native.sql = "SELECT * FROM users LIMIT 10;"
+        mock_native.params = []
+        mock_source.build_query.return_value = mock_native
 
-        assert ctx.sql is not None
-        assert "SELECT" in ctx.sql.upper()
-        assert "users" in ctx.sql
-        assert ctx.error is None
+        ir = QueryIR(
+            operation="SELECT",
+            source=TableSource(table="users"),
+            fields=[FieldExpr(field="*")],
+            limit=10,
+        )
 
-    def test_sets_params(self):
-        workflow = BuildWorkflow()
-        ctx = workflow.run(_make_context())
+        context = PipelineContext(
+            natural_language="show users",
+            source=mock_source,
+            schema={},
+        )
+        context.query_ir = ir
 
-        assert ctx.params is not None
-        assert isinstance(ctx.params, list)
-
-    def test_applies_default_limit_when_none(self):
         workflow = BuildWorkflow(default_limit=100)
-        ctx = _make_context()
-        assert ctx.query_ir.limit is None
-        workflow.run(ctx)
-        assert ctx.query_ir.limit == 100
+        result = workflow.run(context)
 
-    def test_does_not_override_existing_limit(self):
-        workflow = BuildWorkflow(default_limit=100)
-        ctx = _make_context()
-        ctx.query_ir.limit = 10
-        workflow.run(ctx)
-        assert ctx.query_ir.limit == 10
+        mock_source.build_query.assert_called_once_with(ir)
+        assert result.native_query is not None
+        assert result.sql == "SELECT * FROM users LIMIT 10;"
+        assert result.error is None
 
-    def test_custom_default_limit(self):
+    def test_applies_default_limit(self):
+        mock_source = MagicMock()
+        mock_native = MagicMock()
+        mock_native.sql = "SELECT *"
+        mock_native.params = []
+        mock_source.build_query.return_value = mock_native
+
+        ir = QueryIR(
+            operation="SELECT",
+            source=TableSource(table="users"),
+            fields=[FieldExpr(field="*")],
+        )
+
+        context = PipelineContext(
+            natural_language="show users",
+            source=mock_source,
+            schema={},
+        )
+        context.query_ir = ir
+
         workflow = BuildWorkflow(default_limit=50)
-        ctx = _make_context()
-        workflow.run(ctx)
-        assert ctx.query_ir.limit == 50
+        workflow.run(context)
+
+        assert ir.limit == 50

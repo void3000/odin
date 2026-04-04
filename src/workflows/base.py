@@ -17,7 +17,7 @@ class PipelineContext:
 
     # Input (set before pipeline starts)
     natural_language: str
-    db_url: str
+    source: Any  # DataSource instance
     schema: Dict[str, Any]
 
     # Conversation history (for multi-turn sessions)
@@ -25,6 +25,7 @@ class PipelineContext:
 
     # Stage outputs
     query_ir: Optional[QueryIR] = None
+    native_query: Any = None  # NativeQuery from source.build_query()
     sql: Optional[str] = None
     params: Optional[List] = None
     rows: Optional[List[Dict[str, Any]]] = None

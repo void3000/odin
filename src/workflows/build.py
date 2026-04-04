@@ -1,6 +1,5 @@
-"""BuildWorkflow — converts validated QueryIR to SQL."""
+"""BuildWorkflow — converts validated QueryIR to a native query via the source."""
 
-from src.query_builder import SQLBuilder
 from src.workflows.base import Workflow, PipelineContext
 
 
@@ -13,6 +12,9 @@ class BuildWorkflow(Workflow):
     def run(self, context: PipelineContext) -> PipelineContext:
         if context.query_ir and context.query_ir.limit is None:
             context.query_ir.limit = self.default_limit
-        builder = SQLBuilder()
-        context.sql, context.params = builder.build(context.query_ir)
+        context.native_query = context.source.build_query(context.query_ir)
+        # Store sql/params for logging if available
+        if hasattr(context.native_query, "sql"):
+            context.sql = context.native_query.sql
+            context.params = getattr(context.native_query, "params", None)
         return context
