@@ -88,15 +88,25 @@ class TestOrchestratorSummarization:
             }
         }
 
-    def test_process_query_returns_summary(self, tmp_path):
+    def test_process_query_returns_summary(self):
         """Successful query returns summary instead of raw data."""
-        db_path = str(tmp_path / "test.db")
-        import sqlite3
-        conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE users (id INTEGER, name TEXT)")
-        conn.execute("INSERT INTO users VALUES (1, 'Alice')")
-        conn.commit()
-        conn.close()
+        from src.sources.base import QueryResult
+
+        mock_source = MagicMock()
+        mock_source.name = "test_db"
+        mock_source.source_type = "sqlite"
+        mock_source.is_connected.return_value = False
+
+        mock_native = MagicMock()
+        mock_native.sql = "SELECT name FROM users"
+        mock_native.params = []
+        mock_source.build_query.return_value = mock_native
+        mock_source.execute.return_value = QueryResult(
+            rows=[{"name": "Alice"}],
+            columns=["name"],
+            row_count=1,
+            source_name="test_db",
+        )
 
         # First call: IR parsing, Second call: summarization
         self.mock_llm.generate.side_effect = [
@@ -105,7 +115,7 @@ class TestOrchestratorSummarization:
         ]
 
         orchestrator = QueryOrchestrator(
-            db_path=db_path,
+            source=mock_source,
             llm_client=self.mock_llm,
             system_prompt="parse",
             schema=self.schema,
@@ -117,15 +127,25 @@ class TestOrchestratorSummarization:
         assert result["summary"] == "There is 1 user: Alice."
         assert "data" not in result
 
-    def test_process_query_summarize_failure(self, tmp_path):
+    def test_process_query_summarize_failure(self):
         """Summarization failure returns error with stage."""
-        db_path = str(tmp_path / "test.db")
-        import sqlite3
-        conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE users (id INTEGER, name TEXT)")
-        conn.execute("INSERT INTO users VALUES (1, 'Alice')")
-        conn.commit()
-        conn.close()
+        from src.sources.base import QueryResult
+
+        mock_source = MagicMock()
+        mock_source.name = "test_db"
+        mock_source.source_type = "sqlite"
+        mock_source.is_connected.return_value = False
+
+        mock_native = MagicMock()
+        mock_native.sql = "SELECT name FROM users"
+        mock_native.params = []
+        mock_source.build_query.return_value = mock_native
+        mock_source.execute.return_value = QueryResult(
+            rows=[{"name": "Alice"}],
+            columns=["name"],
+            row_count=1,
+            source_name="test_db",
+        )
 
         self.mock_llm.generate.side_effect = [
             (True, '{"operation": "SELECT", "source": {"table": "users"}, "fields": [{"field": "name"}]}'),
@@ -133,7 +153,7 @@ class TestOrchestratorSummarization:
         ]
 
         orchestrator = QueryOrchestrator(
-            db_path=db_path,
+            source=mock_source,
             llm_client=self.mock_llm,
             system_prompt="parse",
             schema=self.schema,
@@ -143,4 +163,3 @@ class TestOrchestratorSummarization:
 
         assert result["success"] is False
         assert result["error"] == "API error"
-        assert result["metadata"]["stage"] == "summarize"

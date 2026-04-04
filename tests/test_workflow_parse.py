@@ -10,7 +10,7 @@ from src.workflows.parse import ParseWorkflow
 def _make_context() -> PipelineContext:
     return PipelineContext(
         natural_language="Show me all users",
-        db_url="/tmp/test.db",
+        source=MagicMock(),
         schema={"users": {"columns": {"id": {"type": "int"}}}},
     )
 

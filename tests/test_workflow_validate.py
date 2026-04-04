@@ -9,7 +9,7 @@ def _make_context(query_ir=None) -> PipelineContext:
     schema = {"users": {"columns": {"id": {"type": "int"}, "name": {"type": "str"}}}}
     ctx = PipelineContext(
         natural_language="Show me all users",
-        db_path="/tmp/test.db",
+        source=MagicMock(),
         schema=schema,
     )
     if query_ir:

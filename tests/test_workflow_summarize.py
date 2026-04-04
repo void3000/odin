@@ -7,7 +7,7 @@ from src.workflows.summarize import SummarizeWorkflow
 def _make_context() -> PipelineContext:
     ctx = PipelineContext(
         natural_language="Show me all users",
-        db_path="/tmp/test.db",
+        source=MagicMock(),
         schema={},
     )
     ctx.sql = "SELECT id, name FROM users"

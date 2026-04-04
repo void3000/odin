@@ -1,23 +1,25 @@
 import pytest
+from unittest.mock import MagicMock
 from src.workflows.base import Workflow, PipelineContext
 from src.graph import ConversationTurn
 
 
 class TestPipelineContext:
     def test_create_with_required_fields(self):
+        mock_source = MagicMock()
         ctx = PipelineContext(
             natural_language="Show me all users",
-            db_url="sqlite:///test.db",
+            source=mock_source,
             schema={"users": {"columns": {"id": {"type": "int"}}}},
         )
         assert ctx.natural_language == "Show me all users"
-        assert ctx.db_url == "sqlite:///test.db"
+        assert ctx.source is mock_source
         assert ctx.schema == {"users": {"columns": {"id": {"type": "int"}}}}
 
     def test_optional_fields_default_to_none(self):
         ctx = PipelineContext(
             natural_language="test",
-            db_url="sqlite:///test.db",
+            source=MagicMock(),
             schema={},
         )
         assert ctx.query_ir is None
@@ -31,7 +33,7 @@ class TestPipelineContext:
     def test_timings_default_to_empty_dict(self):
         ctx = PipelineContext(
             natural_language="test",
-            db_url="sqlite:///test.db",
+            source=MagicMock(),
             schema={},
         )
         assert ctx.timings == {}
@@ -39,7 +41,7 @@ class TestPipelineContext:
     def test_pipeline_context_has_conversation_history(self):
         ctx = PipelineContext(
             natural_language="test",
-            db_url="sqlite:///test.db",
+            source=MagicMock(),
             schema={},
             conversation_history=[
                 ConversationTurn(question="q1", summary="s1"),
@@ -51,7 +53,7 @@ class TestPipelineContext:
     def test_pipeline_context_conversation_history_defaults_none(self):
         ctx = PipelineContext(
             natural_language="test",
-            db_url="sqlite:///test.db",
+            source=MagicMock(),
             schema={},
         )
         assert ctx.conversation_history is None
@@ -76,7 +78,7 @@ class TestWorkflow:
     def test_execute_calls_run_and_records_timing(self):
         ctx = PipelineContext(
             natural_language="test",
-            db_url="sqlite:///test.db",
+            source=MagicMock(),
             schema={},
         )
         workflow = _StubWorkflow()
@@ -89,7 +91,7 @@ class TestWorkflow:
     def test_execute_catches_exception_and_sets_error(self):
         ctx = PipelineContext(
             natural_language="test",
-            db_url="sqlite:///test.db",
+            source=MagicMock(),
             schema={},
         )
         workflow = _FailingWorkflow()
