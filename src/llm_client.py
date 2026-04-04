@@ -86,8 +86,32 @@ class LLMClient:
                         f"Output: {usage.completion_tokens}")
             
             return True, content
-            
+
         except Exception as e:
             error_msg = str(e)
             logger.error(f"LLM generation failed: {error_msg}")
             return False, error_msg
+
+    def generate_stream(self, system_prompt: str, user_message: str):
+        """
+        Stream a response from the LLM token by token.
+
+        Args:
+            system_prompt: System message providing context
+            user_message: User's question or request
+
+        Yields:
+            Content string tokens as they arrive
+        """
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            temperature=self.temperature,
+            stream=True,
+        )
+        for chunk in response:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
