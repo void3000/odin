@@ -231,6 +231,10 @@ async def query(request: Request, body: QueryRequest):
 
 
 if __name__ == "__main__":
+    # Ensure 'import src.server' returns this module, not a second copy
+    import sys
+    sys.modules.setdefault("src.server", sys.modules[__name__])
+
     settings = settings_from_cli()
     setup_logging(
         log_level=logging.getLevelName(settings.log_level.upper()),
