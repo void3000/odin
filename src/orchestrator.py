@@ -39,6 +39,7 @@ class QueryOrchestrator:
 
         parser = IRParser(llm_client, system_prompt)
         summarizer = ResultSummarizer(llm_client)
+        self.summarizer = summarizer
 
         self.steps: List[Workflow] = [
             ParseWorkflow(parser),
@@ -95,6 +96,62 @@ class QueryOrchestrator:
         if context.summary:
             result["summary"] = context.summary
         return result
+
+    STAGE_MESSAGES = {
+        "parse": "Parsing query...",
+        "validate": "Validating...",
+        "build": "Building query...",
+        "execute": "Running query...",
+        "summarize": "Summarizing results...",
+    }
+
+    def process_query_stream(self, natural_language: str, callback, conversation_history=None) -> None:
+        """Process a query with streaming callbacks for status and tokens.
+
+        Args:
+            natural_language: The user's question
+            callback: Function(event_type, data) called for each event.
+                      event_type is "status", "token", or "done".
+            conversation_history: Optional conversation history
+        """
+        logger.info(f"Processing query (streaming): {natural_language}")
+
+        context = PipelineContext(
+            natural_language=natural_language,
+            source=self.source,
+            schema=self.schema,
+            conversation_history=conversation_history,
+        )
+
+        # Run all steps except summarize
+        non_summary_steps = [s for s in self.steps if s.name != "summarize"]
+        for step in non_summary_steps:
+            msg = self.STAGE_MESSAGES.get(step.name, f"Running {step.name}...")
+            callback("status", {"stage": step.name, "message": msg})
+            context = step.execute(context)
+            if context.error:
+                # Surface parse/validate errors as friendly messages
+                if context.failed_stage in ("parse", "validate"):
+                    callback("token", {"content": context.error})
+                    callback("done", {"success": True})
+                else:
+                    callback("token", {"content": "Sorry, I wasn't able to process that query. Please try rephrasing your question."})
+                    logger.error(f"Pipeline failed at {context.failed_stage}: {context.error}")
+                    callback("done", {"success": False})
+                return
+
+        # Stream the summarize step
+        callback("status", {"stage": "summarize", "message": "Summarizing results..."})
+        try:
+            for token in self.summarizer.summarize_stream(
+                context.natural_language, context.rows, context.sql
+            ):
+                callback("token", {"content": token})
+            callback("done", {"success": True})
+        except Exception as e:
+            logger.error(f"Streaming summarization failed: {e}")
+            callback("token", {"content": "Sorry, I wasn't able to summarize the results."})
+            callback("done", {"success": False})
 
     def get_schema_summary(self) -> Dict[str, Any]:
         """Get a summary of the database schema."""
