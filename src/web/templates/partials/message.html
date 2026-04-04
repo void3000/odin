@@ -1,4 +1,5 @@
 <div class="message {{ role }}">
+    <div class="message-label">{% if role == "assistant" %}Odin{% else %}You{% endif %}</div>
     {% if role == "assistant" %}
     <div class="markdown-content">{{ content }}</div>
     {% else %}

@@ -253,19 +253,33 @@ html, body {
 .message.user {
     color: var(--text-primary);
     font-weight: 500;
+    padding-top: 24px;
+    padding-bottom: 8px;
+    border-top: 1px solid var(--border-light);
 }
 
-.message.user::before {
-    content: '';
-    display: block;
-    width: 100%;
-    height: 1px;
-    background: var(--border-light);
-    margin-bottom: 16px;
+.message.user .message-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+    margin-bottom: 6px;
 }
 
 .message.assistant {
-    color: var(--text-primary);
+    color: var(--text-secondary);
+    padding-top: 8px;
+    padding-bottom: 24px;
+}
+
+.message.assistant .message-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    margin-bottom: 6px;
 }
 
 /* ── Input Area ── */

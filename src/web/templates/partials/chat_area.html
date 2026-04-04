@@ -8,6 +8,7 @@
 <div class="chat-messages" id="chat-messages">
     {% for msg in messages %}
     <div class="message {{ msg.role }}">
+        <div class="message-label">{% if msg.role == "assistant" %}Odin{% elif msg.role == "user" %}You{% endif %}</div>
         {% if msg.role == "assistant" %}
         <div class="markdown-content">{{ msg.content }}</div>
         {% else %}
