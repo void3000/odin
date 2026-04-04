@@ -21,10 +21,13 @@ from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import settings_from_cli
-from src.db import create_schema_extractor
 from src.llm_client import LLMClient
 from src.llm.nl_to_ir import NaturalLanguageToIR
 from src.orchestrator import QueryOrchestrator
+from src.sources.config import create_source_from_db_url, load_sources_from_config
+from src.sources.registry import SourceRegistry
+from src.sources.base import SourceSchema
+from src.schema.schema import DatabaseSchema, TableDef, ColumnDef
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 from src.graph import create_graph
@@ -32,6 +35,18 @@ from src.logging_config import get_component_logger, get_uvicorn_log_config, req
 from src.web.routes import router as web_router
 
 logger = get_component_logger("server")
+
+
+def _source_schema_to_database_schema(source_schema: SourceSchema) -> DatabaseSchema:
+    """Convert a SourceSchema to a DatabaseSchema for LLM prompt compatibility."""
+    tables = []
+    for collection in source_schema.collections:
+        columns = [
+            ColumnDef(name=f.name, type=f.type)
+            for f in collection.fields
+        ]
+        tables.append(TableDef(name=collection.name, columns=columns))
+    return DatabaseSchema(tables=tables)
 
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
@@ -128,12 +143,13 @@ app.include_router(web_router)
 
 
 def create_app(
-    db_url: str,
+    db_url: str | None = None,
     llm_base_url: str = "http://localhost:1234/v1",
     llm_api_key: str = "lmstudio",
     llm_model: str = "qwen3.5-27b-claude-4.6-opus-reasoning-distilled",
     temperature: float = 0.1,
     default_limit: int = 100,
+    config_path: str | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI app with an orchestrator.
 
@@ -142,9 +158,32 @@ def create_app(
     """
     global orchestrator, sessions, graph
 
-    schema_extractor = create_schema_extractor(db_url)
-    schema = schema_extractor.extract_schema()
-    search_path = getattr(schema_extractor, "schemas", None)
+    # Build source registry from config file and/or --db URL
+    registry = SourceRegistry()
+    if config_path:
+        registry = load_sources_from_config(config_path)
+    if db_url:
+        source = create_source_from_db_url(db_url)
+        if not config_path:
+            registry.register("default", source)
+        else:
+            # Add as fallback if not already registered
+            try:
+                registry.get("default")
+            except KeyError:
+                registry.register("default", source)
+
+    source = registry.get_default()
+
+    # Extract schema from the source
+    source.connect()
+    try:
+        source_schema = source.get_schema()
+    finally:
+        source.disconnect()
+
+    # Convert SourceSchema to DatabaseSchema for LLM prompt compatibility
+    db_schema = _source_schema_to_database_schema(source_schema)
 
     llm_client = LLMClient(
         base_url=llm_base_url,
@@ -154,22 +193,21 @@ def create_app(
     )
 
     nl_converter = NaturalLanguageToIR(api_key=llm_api_key)
-    system_prompt = nl_converter._build_system_prompt(schema)
+    system_prompt = nl_converter._build_system_prompt(db_schema)
 
     validator_schema = {
-        table.name: {
-            "columns": {col.name: {"type": col.type} for col in table.columns}
+        collection.name: {
+            "columns": {f.name: {"type": f.type} for f in collection.fields}
         }
-        for table in schema.tables
+        for collection in source_schema.collections
     }
 
     orchestrator = QueryOrchestrator(
-        db_url=db_url,
+        source=source,
         llm_client=llm_client,
         system_prompt=system_prompt,
         schema=validator_schema,
         default_limit=default_limit,
-        search_path=search_path,
     )
 
     sessions = set()
@@ -194,6 +232,7 @@ def create_app_from_settings(settings) -> FastAPI:
         llm_model=settings.llm_model,
         temperature=settings.temperature,
         default_limit=settings.default_limit,
+        config_path=settings.config,
     )
 
 

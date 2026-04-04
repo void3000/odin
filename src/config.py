@@ -10,7 +10,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class ServerSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="ODIN_")
 
-    db: str = Field(description="Database connection string")
+    db: str | None = Field(default=None, description="Database connection string")
+    config: str | None = Field(default=None, description="Path to sources YAML config file")
     host: str = Field(default="0.0.0.0", description="Server host")
     port: int = Field(default=8000, description="Server port")
     llm_url: str = Field(default="http://localhost:1234/v1", description="LLM API base URL")

@@ -1,17 +1,13 @@
 """
 Query Orchestrator.
 
-Coordinates the complete query processing pipeline using Workflow steps:
-1. Parse natural language to IR
-2. Validate IR against schema
-3. Build SQL from validated IR
-4. Execute SQL and return results
-5. Summarize results using LLM
+Coordinates the complete query processing pipeline using Workflow steps.
 """
 
 from typing import Any, Dict, List
 
 from src.ir.parser import IRParser
+from src.sources.base import DataSource
 from src.summarizer import ResultSummarizer
 from src.workflows import (
     Workflow,
@@ -28,23 +24,17 @@ logger = get_component_logger("orchestrator")
 
 
 class QueryOrchestrator:
-    """
-    Orchestrates the complete query processing pipeline.
-
-    Pipeline stages are Workflow instances chained together.
-    Each stage reads from and writes to a shared PipelineContext.
-    """
+    """Orchestrates the complete query processing pipeline."""
 
     def __init__(
         self,
-        db_url: str,
+        source: DataSource,
         llm_client: Any,
         system_prompt: str,
         schema: Dict[str, Any],
         default_limit: int = 100,
-        search_path: list[str] | None = None,
     ):
-        self.db_url = db_url
+        self.source = source
         self.schema = schema
 
         parser = IRParser(llm_client, system_prompt)
@@ -54,11 +44,11 @@ class QueryOrchestrator:
             ParseWorkflow(parser),
             ValidateWorkflow(),
             BuildWorkflow(default_limit=default_limit),
-            ExecuteWorkflow(db_url, search_path=search_path),
+            ExecuteWorkflow(),
             SummarizeWorkflow(summarizer),
         ]
 
-        logger.info(f"QueryOrchestrator initialized for database: {db_url}")
+        logger.info(f"QueryOrchestrator initialized for source: {source.name}")
         logger.debug(f"Schema contains {len(schema)} tables")
 
     def process_query(self, natural_language: str, conversation_history=None) -> Dict[str, Any]:
@@ -67,7 +57,7 @@ class QueryOrchestrator:
 
         context = PipelineContext(
             natural_language=natural_language,
-            db_url=self.db_url,
+            source=self.source,
             schema=self.schema,
             conversation_history=conversation_history,
         )
