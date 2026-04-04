@@ -92,11 +92,14 @@ class SQLBuilder:
         """Build SELECT clause."""
         select_parts = []
         for field in fields:
-            if field.field == "*":
+            if field.field == "*" and not field.function:
                 select_parts.append("*")
             else:
                 # Build qualified column name
                 col_name = f"{field.table}.{field.field}" if field.table else field.field
+                # Wrap in aggregate function if specified
+                if field.function:
+                    col_name = f"{field.function}({col_name})"
                 # Add alias if specified
                 if field.alias:
                     select_parts.append(f"{col_name} AS {field.alias}")
