@@ -9,12 +9,16 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from langchain_core.messages import AIMessage, HumanMessage
 
-import src.server as server_module
-
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
 router = APIRouter()
+
+
+def _server():
+    """Lazy import to avoid circular dependency."""
+    import src.server as server_module
+    return server_module
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -32,7 +36,7 @@ async def index(request: Request):
 async def create_session(request: Request):
     """Create a new session, return updated sidebar partial."""
     session_id = str(uuid.uuid4())
-    server_module.sessions.add(session_id)
+    _server().sessions.add(session_id)
     session_names = _get_session_names()
     return templates.TemplateResponse(request, "partials/sidebar.html", context={
         "sessions": session_names,
@@ -43,7 +47,7 @@ async def create_session(request: Request):
 @router.delete("/sessions/{session_id}", response_class=HTMLResponse)
 async def delete_session(request: Request, session_id: str):
     """Delete a session, return updated sidebar partial."""
-    server_module.sessions.discard(session_id)
+    _server().sessions.discard(session_id)
     session_names = _get_session_names()
     return templates.TemplateResponse(request, "partials/sidebar.html", context={
         "sessions": session_names,
@@ -71,7 +75,7 @@ async def chat(request: Request, input: str = Form(...), session_id: str = Form(
         config = {"configurable": {"thread_id": str(uuid.uuid4())}}
 
     graph_result = await asyncio.to_thread(
-        server_module.graph.invoke,
+        _server().graph.invoke,
         {"messages": [HumanMessage(content=input)]},
         config,
     )
@@ -102,12 +106,12 @@ async def refresh_sidebar(request: Request):
 def _get_session_names() -> list[dict]:
     """Get session IDs with display names from the checkpointer."""
     result = []
-    for session_id in server_module.sessions:
+    for session_id in _server().sessions:
         name = "New Session"
         turn_count = 0
         try:
             config = {"configurable": {"thread_id": session_id}}
-            state = server_module.graph.get_state(config)
+            state = _server().graph.get_state(config)
             messages = state.values.get("messages", [])
             if messages:
                 first_human = next(
@@ -132,7 +136,7 @@ def _get_session_messages(session_id: str) -> list[dict]:
     """Get message history for a session from the checkpointer."""
     try:
         config = {"configurable": {"thread_id": session_id}}
-        state = server_module.graph.get_state(config)
+        state = _server().graph.get_state(config)
         messages = state.values.get("messages", [])
     except Exception:
         messages = []
