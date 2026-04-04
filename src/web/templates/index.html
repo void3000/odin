@@ -101,11 +101,7 @@
 
         const userMsg = document.createElement('div');
         userMsg.className = 'message user';
-        const label = document.createElement('div');
-        label.className = 'message-label';
-        label.textContent = 'You';
-        userMsg.appendChild(label);
-        userMsg.appendChild(document.createTextNode(text));
+        userMsg.textContent = text;
         messagesDiv.appendChild(userMsg);
 
         const typing = document.createElement('div');

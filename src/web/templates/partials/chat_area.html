@@ -7,14 +7,16 @@
 </div>
 <div class="chat-messages" id="chat-messages">
     {% for msg in messages %}
-    <div class="message {{ msg.role }}">
-        <div class="message-label">{% if msg.role == "assistant" %}Odin{% elif msg.role == "user" %}You{% endif %}</div>
-        {% if msg.role == "assistant" %}
-        <div class="markdown-content">{{ msg.content }}</div>
-        {% else %}
-        {{ msg.content }}
-        {% endif %}
+    {% if msg.role == "user" %}
+    <div class="message user">{{ msg.content }}</div>
+    {% else %}
+    <div class="message assistant">
+        <div class="assistant-icon"><span>O</span></div>
+        <div class="assistant-body">
+            <div class="markdown-content">{{ msg.content }}</div>
+        </div>
     </div>
+    {% endif %}
     {% endfor %}
     {% if not messages %}
     <div class="empty-state">
