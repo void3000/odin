@@ -41,6 +41,13 @@
 
     function getActiveSession() { return activeSession; }
 
+    function renderMarkdown(container) {
+        container.querySelectorAll('.markdown-content:not([data-rendered])').forEach(function(el) {
+            el.innerHTML = marked.parse(el.textContent);
+            el.setAttribute('data-rendered', 'true');
+        });
+    }
+
     function setActiveSession(sessionId, element) {
         activeSession = sessionId;
         document.getElementById('session-id-input').value = sessionId;
@@ -111,6 +118,7 @@
                 if (indicator) {
                     indicator.outerHTML = html;
                 }
+                renderMarkdown(messagesDiv);
                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
                 if (sessionId) {
                     htmx.ajax('GET', '/sidebar', { target: '#sidebar-content', swap: 'innerHTML' });
