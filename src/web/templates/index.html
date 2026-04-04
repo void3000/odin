@@ -13,16 +13,10 @@
         <div id="sidebar-content">
             {% include "partials/sidebar.html" %}
         </div>
-        <div class="sidebar-footer">
-            <label>
-                <input type="checkbox" id="single-query-toggle"
-                       onchange="toggleSingleQuery(this.checked)" checked>
-                Single query mode
-            </label>
-        </div>
+        <div class="sidebar-footer"></div>
     </div>
     <div class="chat-area" id="chat-area">
-        <div class="chat-header">Single Query</div>
+        <div class="chat-header">New Chat</div>
         <div class="chat-messages" id="chat-messages">
             <div class="empty-state">
                 <div class="empty-state-title">What would you like to know?</div>
@@ -54,7 +48,6 @@
     function setActiveSession(sessionId, element) {
         activeSession = sessionId;
         document.getElementById('session-id-input').value = sessionId;
-        document.getElementById('single-query-toggle').checked = false;
         document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
         if (element) element.classList.add('active');
     }
@@ -62,9 +55,8 @@
     function clearChat() {
         activeSession = null;
         document.getElementById('session-id-input').value = '';
-        document.getElementById('single-query-toggle').checked = true;
         document.getElementById('chat-area').innerHTML = `
-            <div class="chat-header">Single Query</div>
+            <div class="chat-header">New Chat</div>
             <div class="chat-messages" id="chat-messages">
                 <div class="empty-state">
                     <div class="empty-state-title">What would you like to know?</div>
@@ -78,15 +70,6 @@
                     <button type="submit">Send</button>
                 </form>
             </div>`;
-    }
-
-    function toggleSingleQuery(checked) {
-        if (checked) {
-            activeSession = null;
-            document.getElementById('session-id-input').value = '';
-            document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
-            clearChat();
-        }
     }
 
     async function sendMessage(event) {

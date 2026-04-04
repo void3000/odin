@@ -1,10 +1,4 @@
-<div class="chat-header">
-    {% if active_session %}
-        Session
-    {% else %}
-        Single Query
-    {% endif %}
-</div>
+<div class="chat-header">Session</div>
 <div class="chat-messages" id="chat-messages">
     {% for msg in messages %}
     {% if msg.role == "user" %}
