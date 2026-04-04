@@ -25,8 +25,11 @@ from src.db import create_schema_extractor
 from src.llm_client import LLMClient
 from src.llm.nl_to_ir import NaturalLanguageToIR
 from src.orchestrator import QueryOrchestrator
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
 from src.graph import create_graph
 from src.logging_config import get_component_logger, get_uvicorn_log_config, request_id_var, setup_logging
+from src.web.routes import router as web_router
 
 logger = get_component_logger("server")
 
@@ -120,6 +123,8 @@ class SessionMiddleware(BaseHTTPMiddleware):
 app = FastAPI(title="Odin", description="LLM-to-SQL Pipeline")
 app.add_middleware(SessionMiddleware)
 app.add_middleware(RequestIdMiddleware)
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "web" / "static")), name="static")
+app.include_router(web_router)
 
 
 def create_app(
