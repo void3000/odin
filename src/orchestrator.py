@@ -77,7 +77,10 @@ class QueryOrchestrator:
         an unsupported operation), return the error as a friendly summary
         instead of exposing internal state to the client.
         """
-        if context.error and context.failed_stage == "parse":
+        if context.error and context.failed_stage in ("parse", "validate"):
+            # Parse/validate failures often contain useful info for the user
+            # (e.g., "INSERT not supported" or "table 'artists' not found")
+            # Surface them as a helpful response, not an error.
             return {
                 "success": True,
                 "summary": context.error,
