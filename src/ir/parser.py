@@ -63,7 +63,16 @@ class IRParser:
             
             # Extract JSON from response (handle markdown code blocks)
             ir_json = self._extract_json(response)
-            
+
+            # If the LLM returned prose instead of JSON, surface its message
+            stripped = ir_json.strip()
+            if not stripped.startswith("{") and not stripped.startswith("["):
+                logger.info(f"LLM declined to generate IR: {stripped[:100]}...")
+                return {
+                    "success": False,
+                    "error": stripped,
+                }
+
             # Parse and validate as QueryIR
             try:
                 query_ir = QueryIR.model_validate_json(ir_json)

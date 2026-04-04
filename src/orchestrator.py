@@ -71,11 +71,24 @@ class QueryOrchestrator:
         return self._to_result_dict(context)
 
     def _to_result_dict(self, context: PipelineContext) -> Dict[str, Any]:
-        """Convert PipelineContext to the existing result dict format."""
+        """Convert PipelineContext to the existing result dict format.
+
+        If the pipeline failed at the parse stage (e.g., the LLM declined
+        an unsupported operation), return the error as a friendly summary
+        instead of exposing internal state to the client.
+        """
+        if context.error and context.failed_stage == "parse":
+            return {
+                "success": True,
+                "summary": context.error,
+            }
+
         result: Dict[str, Any] = {
             "success": context.error is None,
-            "error": context.error,
         }
+        if context.error:
+            result["summary"] = "Sorry, I wasn't able to process that query. Please try rephrasing your question."
+            logger.error(f"Pipeline failed at {context.failed_stage}: {context.error}")
         if context.summary:
             result["summary"] = context.summary
         return result
